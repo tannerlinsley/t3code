@@ -21,6 +21,10 @@ function parsePort(value: string | undefined, fallback: number): number {
 }
 
 function openBrowser(url: string): void {
+  if (process.env.T3_NO_OPEN === "1") {
+    return;
+  }
+
   const command =
     process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
@@ -28,6 +32,9 @@ function openBrowser(url: string): void {
   const child = spawn(command, args, {
     detached: true,
     stdio: "ignore",
+  });
+  child.on("error", () => {
+    // Best-effort browser launch; keep runtime alive even when opener is unavailable.
   });
   child.unref();
 }

@@ -20,6 +20,12 @@ On launch, `t3`:
 2. serves the web UI in your browser,
 3. auto-connects to your current working directory as the default project.
 
+Optional environment variables:
+
+- `T3_NO_OPEN=1` — start runtime without auto-opening a browser window.
+- `T3_BACKEND_PORT` — override local WebSocket runtime port (default `4317`).
+- `T3_WEB_PORT` — override local web UI port (default `4318`).
+
 ## Workspace layout
 
 - `/apps/t3`: CLI launcher + local WebSocket runtime server.

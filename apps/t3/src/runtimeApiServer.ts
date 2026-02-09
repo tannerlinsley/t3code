@@ -119,6 +119,9 @@ function openPathInFileManager(targetPath: string): void {
     detached: true,
     stdio: "ignore",
   });
+  child.on("error", () => {
+    // Best-effort shell handoff.
+  });
   child.unref();
 }
 
@@ -404,6 +407,9 @@ export async function startRuntimeApiServer(
       const child = spawn(editor.command, [parsed.cwd], {
         detached: true,
         stdio: "ignore",
+      });
+      child.on("error", () => {
+        // Best-effort editor launch.
       });
       child.unref();
       return null;
