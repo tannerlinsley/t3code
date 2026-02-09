@@ -95,6 +95,29 @@ interface BootstrapSessionResult {
   bootstrapError: string | undefined;
 }
 
+function raceWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
 function responseSuccess(id: string, result: unknown): WsResponseMessage {
   return {
     type: "response",
@@ -354,7 +377,7 @@ export async function startRuntimeApiServer(
 
     launchSessionPromise = (async () => {
       try {
-        const startedSession = await Promise.race([
+        const startedSession = await raceWithTimeout(
           providerManager.startSession({
             provider: "codex",
             cwd: launchCwd,
@@ -362,12 +385,9 @@ export async function startRuntimeApiServer(
             approvalPolicy: "never",
             sandboxMode: "danger-full-access",
           }),
-          new Promise<never>((_, reject) => {
-            setTimeout(() => {
-              reject(new Error("Timed out starting launch session."));
-            }, bootstrapSessionTimeoutMs);
-          }),
-        ]);
+          bootstrapSessionTimeoutMs,
+          "Timed out starting launch session.",
+        );
         bootstrapFallbackSession = null;
         return {
           session: startedSession,
