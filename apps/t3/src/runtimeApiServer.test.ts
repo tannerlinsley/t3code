@@ -1036,6 +1036,37 @@ describe("runtimeApiServer", () => {
     client.socket.close();
   });
 
+  it("returns launch-cwd-relative errors for missing shell.openInEditor targets", async () => {
+    const launchCwd = mkdtempSync(path.join(os.tmpdir(), "t3-shell-missing-relative-"));
+    const server = await startRuntimeApiServer({
+      port: 0,
+      launchCwd,
+    });
+    servers.push(server);
+
+    const client = await connectClient(server.wsUrl);
+    await client.nextMessage();
+
+    const response = await sendRequest(
+      client.socket,
+      client.nextMessage,
+      "shell-missing-relative-1",
+      "shell.openInEditor",
+      {
+        cwd: "missing-dir",
+        editor: "file-manager",
+      },
+    );
+    expect(response.ok).toBe(false);
+    if (response.ok) {
+      throw new Error("Expected relative missing shell target request to fail.");
+    }
+    expect(response.error?.code).toBe("request_failed");
+    expect(response.error?.message).toContain(path.join(launchCwd, "missing-dir"));
+
+    client.socket.close();
+  });
+
   it("returns structured errors when shell.openInEditor target is not a directory", async () => {
     const server = await startRuntimeApiServer({
       port: 0,
