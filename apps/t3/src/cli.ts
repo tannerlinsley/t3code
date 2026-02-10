@@ -849,6 +849,22 @@ function applyStaticSecurityHeaders(
   response.setHeader("Cache-Control", options.cacheControl);
 }
 
+function applyRangeCapabilityHeaders(response: ServerResponse): void {
+  response.setHeader("Accept-Ranges", "bytes");
+  response.setHeader("Vary", "Range");
+}
+
+function applyStaticValidatorHeaders(
+  response: ServerResponse,
+  validators: {
+    etag: string;
+    lastModified: string;
+  },
+): void {
+  response.setHeader("ETag", validators.etag);
+  response.setHeader("Last-Modified", validators.lastModified);
+}
+
 function startStaticWebServer(distRoot: string, port: number) {
   const normalizedDistRoot = path.resolve(distRoot);
   const resolvedRealDistRoot = (() => {
@@ -907,10 +923,11 @@ function startStaticWebServer(distRoot: string, port: number) {
           response.statusCode = 412;
           response.setHeader("Content-Type", "text/plain; charset=utf-8");
           response.setHeader("Content-Length", String(body.byteLength));
-          response.setHeader("ETag", etag);
-          response.setHeader("Last-Modified", lastModified);
-          response.setHeader("Accept-Ranges", "bytes");
-          response.setHeader("Vary", "Range");
+          applyStaticValidatorHeaders(response, {
+            etag,
+            lastModified,
+          });
+          applyRangeCapabilityHeaders(response);
           applyStaticSecurityHeaders(response, {
             cacheControl: "no-store",
           });
@@ -926,10 +943,11 @@ function startStaticWebServer(distRoot: string, port: number) {
         if (shouldReturnNotModified) {
           response.statusCode = 304;
           response.setHeader("Content-Type", contentTypeFor(targetPath));
-          response.setHeader("ETag", etag);
-          response.setHeader("Last-Modified", lastModified);
-          response.setHeader("Accept-Ranges", "bytes");
-          response.setHeader("Vary", "Range");
+          applyStaticValidatorHeaders(response, {
+            etag,
+            lastModified,
+          });
+          applyRangeCapabilityHeaders(response);
           applyStaticSecurityHeaders(response, {
             cacheControl: cacheControlFor(targetPath),
           });
@@ -941,10 +959,10 @@ function startStaticWebServer(distRoot: string, port: number) {
         if (resolvedRange === "invalid") {
           respondText(416, "Range Not Satisfiable", {
             "Content-Range": `bytes */${stats.size}`,
-            "Accept-Ranges": "bytes",
-            Vary: "Range",
             ETag: etag,
             "Last-Modified": lastModified,
+            "Accept-Ranges": "bytes",
+            Vary: "Range",
           });
           return;
         }
@@ -955,14 +973,15 @@ function startStaticWebServer(distRoot: string, port: number) {
 
         response.statusCode = effectiveRange ? 206 : 200;
         response.setHeader("Content-Type", contentTypeFor(targetPath));
-        response.setHeader("ETag", etag);
-        response.setHeader("Last-Modified", lastModified);
+        applyStaticValidatorHeaders(response, {
+          etag,
+          lastModified,
+        });
         response.setHeader(
           "Content-Length",
           String(effectiveRange ? effectiveRange.end - effectiveRange.start + 1 : stats.size),
         );
-        response.setHeader("Accept-Ranges", "bytes");
-        response.setHeader("Vary", "Range");
+        applyRangeCapabilityHeaders(response);
         if (effectiveRange) {
           response.setHeader("Content-Range", `bytes ${effectiveRange.start}-${effectiveRange.end}/${stats.size}`);
         }
