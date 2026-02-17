@@ -427,32 +427,21 @@ async function seedRendererState(
   return window.webContents.executeJavaScript(script, true);
 }
 
-async function readRendererPersistedStateSnapshot(window: BrowserWindow): Promise<{
-  url: string;
-  projects: number;
-  threads: number;
-}> {
+async function readRendererPersistedThreadCount(window: BrowserWindow): Promise<number> {
   const script = `
     (() => {
       const key = "t3code:renderer-state:v7";
       const raw = localStorage.getItem(key);
-      let projects = 0;
       let threads = 0;
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          projects = Array.isArray(parsed?.projects) ? parsed.projects.length : 0;
           threads = Array.isArray(parsed?.threads) ? parsed.threads.length : 0;
         } catch {
-          projects = -1;
           threads = -1;
         }
       }
-      return {
-        url: window.location.href,
-        projects,
-        threads,
-      };
+      return threads;
     })();
   `;
   return window.webContents.executeJavaScript(script, true);
@@ -1051,38 +1040,25 @@ export async function runDesktopPerfAutomation(window: BrowserWindow): Promise<v
       timeoutMs: 60_000,
       label: "initial load",
     });
-    const preSeedSnapshot = await readRendererPersistedStateSnapshot(window);
-    console.log(
-      `[desktop-perf] pre-seed renderer state url=${preSeedSnapshot.url} projects=${preSeedSnapshot.projects} threads=${preSeedSnapshot.threads}`,
-    );
     console.log("[desktop-perf] seeding renderer state");
-    const persistedCounts = await seedRendererState(window, seed.state);
-    console.log(
-      `[desktop-perf] seeded localStorage counts projects=${persistedCounts.projects} threads=${persistedCounts.threads}`,
-    );
+    await seedRendererState(window, seed.state);
     console.log("[desktop-perf] waiting for reload");
     await waitForDidFinishLoad(window.webContents, {
       timeoutMs: 60_000,
       label: "post-seed reload",
     });
-    let postSeedSnapshot = await readRendererPersistedStateSnapshot(window);
-    console.log(
-      `[desktop-perf] post-seed renderer state url=${postSeedSnapshot.url} projects=${postSeedSnapshot.projects} threads=${postSeedSnapshot.threads}`,
-    );
-    if (postSeedSnapshot.threads <= 0) {
+    let postSeedThreadCount = await readRendererPersistedThreadCount(window);
+    if (postSeedThreadCount <= 0) {
       console.warn("[desktop-perf] post-seed state had no threads; retrying seed on current origin");
-      const retryCounts = await seedRendererState(window, seed.state);
-      console.log(
-        `[desktop-perf] retry seeded localStorage counts projects=${retryCounts.projects} threads=${retryCounts.threads}`,
-      );
+      await seedRendererState(window, seed.state);
       await waitForDidFinishLoad(window.webContents, {
         timeoutMs: 60_000,
         label: "post-seed retry reload",
       });
-      postSeedSnapshot = await readRendererPersistedStateSnapshot(window);
-      console.log(
-        `[desktop-perf] post-seed retry renderer state url=${postSeedSnapshot.url} projects=${postSeedSnapshot.projects} threads=${postSeedSnapshot.threads}`,
-      );
+      postSeedThreadCount = await readRendererPersistedThreadCount(window);
+      if (postSeedThreadCount <= 0) {
+        console.warn("[desktop-perf] post-seed retry still has no threads");
+      }
     }
     await delay(300);
 
