@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveBenchmarkFollowUpPassCount, shouldRunTerminalPerfInteractions } from "./perfConfig";
+import {
+  resolveBenchmarkFollowUpPassCount,
+  shouldRunOptionalRendererPerfInteractions,
+  shouldRunTerminalPerfInteractions,
+} from "./perfConfig";
 
 describe("shouldRunTerminalPerfInteractions", () => {
   it("defaults to enabled outside CI when env is unset", () => {
@@ -170,5 +174,27 @@ describe("resolveBenchmarkFollowUpPassCount", () => {
         CI: "false",
       }),
     ).toBe(1);
+  });
+});
+
+describe("shouldRunOptionalRendererPerfInteractions", () => {
+  it("defaults to enabled outside CI and disabled in CI", () => {
+    expect(shouldRunOptionalRendererPerfInteractions({ CI: "false" })).toBe(true);
+    expect(shouldRunOptionalRendererPerfInteractions({ CI: "true" })).toBe(false);
+  });
+
+  it("supports explicit env overrides", () => {
+    expect(
+      shouldRunOptionalRendererPerfInteractions({
+        T3CODE_DESKTOP_PERF_RUN_OPTIONAL_RENDERER: "1",
+        CI: "true",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunOptionalRendererPerfInteractions({
+        T3CODE_DESKTOP_PERF_RUN_OPTIONAL_RENDERER: "off",
+        CI: "false",
+      }),
+    ).toBe(false);
   });
 });

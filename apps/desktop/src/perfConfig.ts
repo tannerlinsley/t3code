@@ -3,6 +3,11 @@ type PerfToggleEnv = {
   CI?: string | undefined;
 };
 
+type OptionalRendererToggleEnv = {
+  T3CODE_DESKTOP_PERF_RUN_OPTIONAL_RENDERER?: string | undefined;
+  CI?: string | undefined;
+};
+
 type PerfBenchmarkEnv = {
   T3CODE_DESKTOP_PERF_BENCHMARK_FOLLOW_UP_PASSES?: string | undefined;
   CI?: string | undefined;
@@ -36,6 +41,12 @@ function isCiEnvironment(value: string | undefined): boolean {
  */
 export function shouldRunTerminalPerfInteractions(env: PerfToggleEnv): boolean {
   const toggleOverride = parseBooleanLike(env.T3CODE_DESKTOP_PERF_RUN_TERMINAL);
+  if (toggleOverride !== null) return toggleOverride;
+  return !isCiEnvironment(env.CI);
+}
+
+export function shouldRunOptionalRendererPerfInteractions(env: OptionalRendererToggleEnv): boolean {
+  const toggleOverride = parseBooleanLike(env.T3CODE_DESKTOP_PERF_RUN_OPTIONAL_RENDERER);
   if (toggleOverride !== null) return toggleOverride;
   return !isCiEnvironment(env.CI);
 }

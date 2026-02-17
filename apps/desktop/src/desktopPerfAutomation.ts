@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { BrowserWindow, contentTracing, type WebContents } from "electron";
-import { resolveBenchmarkFollowUpPassCount, shouldRunTerminalPerfInteractions } from "./perfConfig";
+import {
+  resolveBenchmarkFollowUpPassCount,
+  shouldRunOptionalRendererPerfInteractions,
+  shouldRunTerminalPerfInteractions,
+} from "./perfConfig";
 
 const PERF_AUTOMATION_ENABLED = process.env.T3CODE_DESKTOP_PERF_AUTOMATION === "1";
 const PERF_TRACE_OUT_PATH = process.env.T3CODE_DESKTOP_PERF_TRACE_OUT?.trim() ?? "";
@@ -12,6 +16,10 @@ const PERF_DONE_OUT_PATH = process.env.T3CODE_DESKTOP_PERF_DONE_OUT?.trim() ?? "
 const PERF_SEED_PATH = process.env.T3CODE_DESKTOP_PERF_SEED_PATH?.trim() ?? "";
 const RUN_TERMINAL_INTERACTIONS = shouldRunTerminalPerfInteractions({
   T3CODE_DESKTOP_PERF_RUN_TERMINAL: process.env.T3CODE_DESKTOP_PERF_RUN_TERMINAL,
+  CI: process.env.CI,
+});
+const RUN_OPTIONAL_RENDERER_INTERACTIONS = shouldRunOptionalRendererPerfInteractions({
+  T3CODE_DESKTOP_PERF_RUN_OPTIONAL_RENDERER: process.env.T3CODE_DESKTOP_PERF_RUN_OPTIONAL_RENDERER,
   CI: process.env.CI,
 });
 const BENCHMARK_FOLLOW_UP_PASS_COUNT = resolveBenchmarkFollowUpPassCount({
@@ -729,29 +737,33 @@ async function runRendererPerfInteractions(
         return preferred.textContent?.trim() ?? null;
       };
 
-      const selectedModel = await selectOption(
-        "[data-perf-model-trigger]",
-        "[data-perf-model-option]",
-        "Model",
-      );
-      await selectOption(
-        "[data-perf-reasoning-trigger]",
-        "[data-perf-reasoning-option]",
-        "Reasoning",
-      );
+      const runOptionalRendererInteractions = ${RUN_OPTIONAL_RENDERER_INTERACTIONS};
+      let selectedModel = null;
+      if (runOptionalRendererInteractions) {
+        selectedModel = await selectOption(
+          "[data-perf-model-trigger]",
+          "[data-perf-model-option]",
+          "Model",
+        );
+        await selectOption(
+          "[data-perf-reasoning-trigger]",
+          "[data-perf-reasoning-option]",
+          "Reasoning",
+        );
 
-      const diffToggle = document.querySelector("[data-perf-diff-toggle]");
-      if (diffToggle instanceof HTMLElement) {
-        clickElement(diffToggle);
-        await sleep(70);
-        clickElement(diffToggle);
-        await sleep(70);
-      }
+        const diffToggle = document.querySelector("[data-perf-diff-toggle]");
+        if (diffToggle instanceof HTMLElement) {
+          clickElement(diffToggle);
+          await sleep(70);
+          clickElement(diffToggle);
+          await sleep(70);
+        }
 
-      const runtimeToggle = document.querySelector("[data-perf-runtime-toggle]");
-      if (runtimeToggle instanceof HTMLElement) {
-        clickElement(runtimeToggle);
-        await sleep(100);
+        const runtimeToggle = document.querySelector("[data-perf-runtime-toggle]");
+        if (runtimeToggle instanceof HTMLElement) {
+          clickElement(runtimeToggle);
+          await sleep(100);
+        }
       }
 
       return {
