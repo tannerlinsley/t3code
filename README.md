@@ -27,6 +27,8 @@ T3 Code runs as a **Node.js WebSocket server** that wraps `codex app-server` (JS
 └─────────────────────────────────┘
 ```
 
+Remote deployment and frontend-to-remote connection details are documented in `REMOTE.md`.
+
 ## Workspace layout
 
 - `/apps/server`: Node.js WebSocket server. Wraps Codex app-server, serves the built web app, and opens the browser on start.

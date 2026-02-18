@@ -143,10 +143,14 @@ class MockTerminalManager extends EventEmitter<{ event: [event: TerminalEvent] }
   dispose(): void {}
 }
 
-function connectWs(port: number, token?: string): Promise<WebSocket> {
+function connectWs(
+  port: number,
+  token?: string,
+  headers?: Record<string, string>,
+): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
     const query = token ? `?token=${encodeURIComponent(token)}` : "";
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`, { headers });
     const pending: PendingMessages = { queue: [], waiters: [] };
     pendingBySocket.set(ws, pending);
 
@@ -1055,6 +1059,22 @@ describe("WebSocket Server", () => {
     const authorizedWs = await connectWs(port, "secret-token");
     connections.push(authorizedWs);
     const welcome = (await waitForMessage(authorizedWs)) as WsPush;
+    expect(welcome.channel).toBe(WS_CHANNELS.serverWelcome);
+  });
+
+  it("accepts bearer auth header for websocket authentication", async () => {
+    server = createTestServer({ cwd: "/test", authToken: "secret-token" });
+    await server.start();
+    const addr = server.httpServer.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    await expect(
+      connectWs(port, undefined, { Authorization: "Bearer wrong-token" }),
+    ).rejects.toThrow("WebSocket connection failed");
+
+    const ws = await connectWs(port, undefined, { Authorization: "Bearer secret-token" });
+    connections.push(ws);
+    const welcome = (await waitForMessage(ws)) as WsPush;
     expect(welcome.channel).toBe(WS_CHANNELS.serverWelcome);
   });
 });

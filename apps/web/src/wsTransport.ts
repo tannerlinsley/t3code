@@ -10,6 +10,49 @@ interface PendingRequest {
 
 const REQUEST_TIMEOUT_MS = 60_000;
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000];
+const RUNTIME_WS_URL_PARAM = "t3WsUrl";
+const RUNTIME_WS_TOKEN_PARAM = "t3Token";
+
+function trimToUndefined(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readRuntimeParam(name: string): string | undefined {
+  const fromSearch = trimToUndefined(new URLSearchParams(window.location.search).get(name));
+  if (fromSearch) return fromSearch;
+
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  return trimToUndefined(new URLSearchParams(hash).get(name));
+}
+
+function normalizeWsUrl(raw: string): string {
+  try {
+    const parsed = new URL(raw, window.location.href);
+    if (parsed.protocol === "http:") parsed.protocol = "ws:";
+    if (parsed.protocol === "https:") parsed.protocol = "wss:";
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function withAuthToken(url: string, token: string | undefined): string {
+  if (!token) return url;
+  try {
+    const parsed = new URL(url, window.location.href);
+    if (!parsed.searchParams.get("token")) {
+      parsed.searchParams.set("token", token);
+    }
+    return parsed.toString();
+  } catch {
+    const glue = url.includes("?") ? "&" : "?";
+    return `${url}${glue}token=${encodeURIComponent(token)}`;
+  }
+}
 
 export class WsTransport {
   private ws: WebSocket | null = null;
@@ -23,16 +66,18 @@ export class WsTransport {
 
   constructor(url?: string) {
     const bridgeUrl = window.desktopBridge?.getWsUrl();
+    const runtimeWsUrl = readRuntimeParam(RUNTIME_WS_URL_PARAM);
+    const runtimeWsToken = readRuntimeParam(RUNTIME_WS_TOKEN_PARAM);
     // In dev mode, VITE_WS_URL points to the server's WebSocket endpoint.
     // In production, the page is served by the WS server on the same host:port.
     const envUrl = import.meta.env.VITE_WS_URL as string | undefined;
-    this.url =
-      url ??
-      (bridgeUrl && bridgeUrl.length > 0
-        ? bridgeUrl
-        : envUrl && envUrl.length > 0
-          ? envUrl
-          : `ws://${window.location.hostname}:${window.location.port}`);
+    const envToken = trimToUndefined(import.meta.env.VITE_WS_TOKEN as string | undefined);
+    const defaultProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const defaultUrl = `${defaultProtocol}://${window.location.host}`;
+    const selectedUrl = trimToUndefined(
+      url ?? bridgeUrl ?? runtimeWsUrl ?? trimToUndefined(envUrl) ?? defaultUrl,
+    );
+    this.url = withAuthToken(normalizeWsUrl(selectedUrl ?? defaultUrl), runtimeWsToken ?? envToken);
     this.connect();
   }
 

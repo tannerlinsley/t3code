@@ -34,6 +34,15 @@ function parsePort(value: string | undefined): number | undefined {
   return parsed;
 }
 
+function parseHost(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    throw new Error("Invalid T3CODE_HOST: cannot be empty");
+  }
+  return trimmed;
+}
+
 function expandHomePath(input: string): string {
   if (input === "~") return os.homedir();
   if (input.startsWith("~/")) {
@@ -99,8 +108,10 @@ function resolveStaticDir(): string | undefined {
 async function main() {
   const mode: RuntimeMode = process.env.T3CODE_MODE === "desktop" ? "desktop" : "web";
   const requestedPort = parsePort(process.env.T3CODE_PORT);
+  const requestedHost = parseHost(process.env.T3CODE_HOST);
   const port =
     requestedPort ?? (mode === "desktop" ? DEFAULT_PORT : await findAvailablePort(DEFAULT_PORT));
+  const host = requestedHost ?? (mode === "desktop" ? "127.0.0.1" : undefined);
   const stateDir = resolveStateDir(process.env.T3CODE_STATE_DIR);
   const projectRegistry = new ProjectRegistry(stateDir);
   const devUrl = process.env.VITE_DEV_SERVER_URL;
@@ -116,7 +127,7 @@ async function main() {
 
   const server = createServer({
     port,
-    host: mode === "desktop" ? "127.0.0.1" : undefined,
+    host,
     cwd,
     staticDir,
     devUrl,
@@ -128,6 +139,7 @@ async function main() {
   const url = `http://localhost:${port}`;
   logger.info("T3 Code running", {
     url,
+    host: host ?? "0.0.0.0",
     cwd,
     mode,
     stateDir,

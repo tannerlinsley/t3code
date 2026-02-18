@@ -31,6 +31,34 @@ let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
 
+function trimToUndefined(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveRemoteWsUrl(rawUrl: string, rawToken: string | undefined): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid T3CODE_REMOTE_WS_URL: ${rawUrl}`);
+  }
+
+  if (parsed.protocol === "http:") parsed.protocol = "ws:";
+  if (parsed.protocol === "https:") parsed.protocol = "wss:";
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new Error(`Invalid T3CODE_REMOTE_WS_URL protocol: ${parsed.protocol}`);
+  }
+
+  const token = trimToUndefined(rawToken);
+  if (token && !parsed.searchParams.get("token")) {
+    parsed.searchParams.set("token", token);
+  }
+
+  return parsed.toString();
+}
+
 async function reserveLoopbackPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
@@ -247,6 +275,15 @@ function createWindow(): BrowserWindow {
 }
 
 async function bootstrap(): Promise<void> {
+  const remoteWsUrl = trimToUndefined(process.env.T3CODE_REMOTE_WS_URL);
+  if (remoteWsUrl) {
+    backendWsUrl = resolveRemoteWsUrl(remoteWsUrl, process.env.T3CODE_REMOTE_WS_TOKEN);
+    process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
+    registerIpcHandlers();
+    mainWindow = createWindow();
+    return;
+  }
+
   backendPort = await reserveLoopbackPort();
   backendAuthToken = randomBytes(24).toString("hex");
   backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;

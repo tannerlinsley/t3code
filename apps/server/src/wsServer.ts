@@ -198,6 +198,28 @@ export function createServer(options: ServerOptions) {
   // WebSocket server — upgrades from the HTTP server
   const wss = new WebSocketServer({ noServer: true });
 
+  function parseBearerToken(authorizationHeader: string | string[] | undefined): string | null {
+    const raw = Array.isArray(authorizationHeader)
+      ? authorizationHeader[0]
+      : authorizationHeader;
+    if (!raw) return null;
+    const match = raw.match(/^Bearer\s+(.+)$/i);
+    const token = match?.[1]?.trim();
+    return token && token.length > 0 ? token : null;
+  }
+
+  function parseTokenFromQuery(requestUrl: string | undefined): string | null {
+    const url = new URL(requestUrl ?? "/", `http://localhost:${port}`);
+    const queryToken = url.searchParams.get("token");
+    return queryToken && queryToken.length > 0 ? queryToken : null;
+  }
+
+  function parseUpgradeToken(request: http.IncomingMessage): string | null {
+    const bearerToken = parseBearerToken(request.headers.authorization);
+    if (bearerToken) return bearerToken;
+    return parseTokenFromQuery(request.url);
+  }
+
   function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
     socket.write(
       `HTTP/1.1 ${statusCode} ${statusCode === 401 ? "Unauthorized" : "Bad Request"}\r\n` +
@@ -212,17 +234,14 @@ export function createServer(options: ServerOptions) {
 
   httpServer.on("upgrade", (request, socket, head) => {
     if (authToken) {
-      let providedToken: string | null = null;
       try {
-        const url = new URL(request.url ?? "/", `http://localhost:${port}`);
-        providedToken = url.searchParams.get("token");
+        const providedToken = parseUpgradeToken(request);
+        if (providedToken !== authToken) {
+          rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");
+          return;
+        }
       } catch {
         rejectUpgrade(socket, 400, "Invalid WebSocket URL");
-        return;
-      }
-
-      if (providedToken !== authToken) {
-        rejectUpgrade(socket, 401, "Unauthorized WebSocket connection");
         return;
       }
     }
