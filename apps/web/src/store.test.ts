@@ -79,6 +79,7 @@ function makeState(thread: Thread): AppState {
     ],
     threads: [thread],
     activeThreadId: thread.id,
+    threadsHydrated: true,
     runtimeMode: "full-access",
     diffOpen: false,
   };
@@ -530,6 +531,7 @@ describe("store reducer thread continuity", () => {
         }),
       ],
       activeThreadId: "thread-b",
+      threadsHydrated: true,
       runtimeMode: "full-access",
       diffOpen: false,
     };
@@ -580,6 +582,7 @@ describe("store reducer thread continuity", () => {
       ],
       threads: [makeThread({ id: "thread-a", projectId: "project-old-a" })],
       activeThreadId: "thread-a",
+      threadsHydrated: true,
       runtimeMode: "full-access",
       diffOpen: false,
     };
@@ -628,6 +631,16 @@ describe("store reducer thread continuity", () => {
     ]);
   });
 
+  it("marks threads hydration state", () => {
+    const state = makeState(makeThread());
+    const next = reducer(state, {
+      type: "SET_THREADS_HYDRATED",
+      hydrated: false,
+    });
+
+    expect(next.threadsHydrated).toBe(false);
+  });
+
   it("deletes a project and all of its threads", () => {
     const state: AppState = {
       projects: [
@@ -659,6 +672,7 @@ describe("store reducer thread continuity", () => {
         }),
       ],
       activeThreadId: "thread-a",
+      threadsHydrated: true,
       runtimeMode: "full-access",
       diffOpen: false,
     };
