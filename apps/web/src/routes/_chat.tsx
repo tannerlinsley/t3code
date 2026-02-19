@@ -1,6 +1,6 @@
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 
-import DiffPanel from "../components/DiffPanel";
+import DiffPanel, { DiffWorkerPoolProvider } from "../components/DiffPanel";
 import Sidebar from "../components/Sidebar";
 import { useStore } from "../store";
 
@@ -11,7 +11,11 @@ function ChatRouteLayout() {
     <div className="flex h-screen overflow-hidden bg-background text-foreground isolate">
       <Sidebar />
       <Outlet />
-      {state.diffOpen && <DiffPanel />}
+      {state.diffOpen && (
+        <DiffWorkerPoolProvider>
+          <DiffPanel />
+        </DiffWorkerPoolProvider>
+      )}
     </div>
   );
 }
