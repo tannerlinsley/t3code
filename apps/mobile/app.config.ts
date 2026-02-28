@@ -1,7 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 
-const DEV_ICON = "../../assets/T3 Code blueprint-macOS-Default-1024x1024@1x.png";
-const PROD_ICON = "../../assets/T3 Code-macOS-Default-1024x1024@1x.png";
+const DEV_ICON = "./assets/t3-blueprint-icon.png";
+const PROD_ICON = "./assets/t3-icon.png";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 const iconPath = isDevelopment ? DEV_ICON : PROD_ICON;
