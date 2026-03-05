@@ -1,4 +1,33 @@
-import { type ChildProcess as ChildProcessHandle, spawn, spawnSync } from "node:child_process";
+import {
+  type ChildProcess as ChildProcessHandle,
+  type ChildProcessWithoutNullStreams,
+  spawn,
+  spawnSync,
+  type StdioOptions,
+} from "node:child_process";
+
+import type { ServerRuntimeEnvironment } from "@t3tools/contracts";
+
+import { detectServerRuntimeEnvironment } from "./runtimeEnvironment";
+
+interface ProcessSpawnBaseOptions {
+  cwd?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  runtimeEnvironment?: ServerRuntimeEnvironment | undefined;
+  shell?: boolean | undefined;
+}
+
+export interface ProcessSpawnOptions extends ProcessSpawnBaseOptions {
+  stdio?: StdioOptions | undefined;
+  detached?: boolean | undefined;
+}
+
+export interface ProcessSpawnSyncOptions extends ProcessSpawnBaseOptions {
+  stdio?: StdioOptions | undefined;
+  detached?: boolean | undefined;
+  encoding?: BufferEncoding | undefined;
+  input?: string | undefined;
+}
 
 export interface ProcessRunOptions {
   cwd?: string | undefined;
@@ -8,6 +37,8 @@ export interface ProcessRunOptions {
   allowNonZeroExit?: boolean | undefined;
   maxBufferBytes?: number | undefined;
   outputMode?: "error" | "truncate" | undefined;
+  runtimeEnvironment?: ServerRuntimeEnvironment | undefined;
+  shell?: boolean | undefined;
 }
 
 export interface ProcessRunResult {
@@ -24,6 +55,89 @@ function commandLabel(command: string, args: readonly string[]): string {
   return [command, ...args].join(" ");
 }
 
+function resolveRuntimeEnvironment(
+  runtimeEnvironment: ServerRuntimeEnvironment | undefined,
+): ServerRuntimeEnvironment {
+  return runtimeEnvironment ?? detectServerRuntimeEnvironment();
+}
+
+function shouldUseShell(options: ProcessSpawnBaseOptions): boolean {
+  if (options.shell !== undefined) {
+    return options.shell;
+  }
+
+  return resolveRuntimeEnvironment(options.runtimeEnvironment).platform === "windows";
+}
+
+function toSpawnOptions(options: ProcessSpawnOptions) {
+  return {
+    cwd: options.cwd,
+    env: options.env,
+    shell: shouldUseShell(options),
+    ...(options.stdio !== undefined ? { stdio: options.stdio } : {}),
+    ...(options.detached !== undefined ? { detached: options.detached } : {}),
+  };
+}
+
+export function spawnProcess(
+  command: string,
+  args: readonly string[],
+  options: ProcessSpawnOptions = {},
+): ChildProcessHandle {
+  return spawn(command, args, toSpawnOptions(options));
+}
+
+export function spawnPipedProcess(
+  command: string,
+  args: readonly string[],
+  options: Omit<ProcessSpawnOptions, "stdio" | "detached"> = {},
+): ChildProcessWithoutNullStreams {
+  return spawnProcess(command, args, {
+    ...options,
+    stdio: "pipe",
+  }) as ChildProcessWithoutNullStreams;
+}
+
+export function spawnProcessSync(
+  command: string,
+  args: readonly string[],
+  options: ProcessSpawnSyncOptions = {},
+) {
+  return spawnSync(command, args, {
+    cwd: options.cwd,
+    env: options.env,
+    shell: shouldUseShell(options),
+    encoding: options.encoding ?? "utf8",
+    ...(options.stdio !== undefined ? { stdio: options.stdio } : {}),
+    ...(options.detached !== undefined ? { detached: options.detached } : {}),
+    ...(options.input !== undefined ? { input: options.input } : {}),
+  });
+}
+
+export function spawnDetachedProcess(
+  command: string,
+  args: readonly string[],
+  options: Omit<ProcessSpawnOptions, "stdio" | "detached"> = {},
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawnProcess(command, args, {
+      ...options,
+      detached: true,
+      stdio: "ignore",
+    });
+
+    const handleSpawn = () => {
+      child.unref();
+      resolve();
+    };
+
+    child.once("spawn", handleSpawn);
+    child.once("error", (error) => {
+      reject(normalizeSpawnError(command, args, error));
+    });
+  });
+}
+
 function normalizeSpawnError(command: string, args: readonly string[], error: unknown): Error {
   if (!(error instanceof Error)) {
     return new Error(`Failed to run ${commandLabel(command, args)}.`);
@@ -37,8 +151,12 @@ function normalizeSpawnError(command: string, args: readonly string[], error: un
   return new Error(`Failed to run ${commandLabel(command, args)}: ${error.message}`);
 }
 
-function isWindowsCommandNotFound(code: number | null, stderr: string): boolean {
-  if (process.platform !== "win32") return false;
+function isWindowsCommandNotFound(
+  code: number | null,
+  stderr: string,
+  runtimeEnvironment?: ServerRuntimeEnvironment,
+): boolean {
+  if (resolveRuntimeEnvironment(runtimeEnvironment).platform !== "windows") return false;
   if (code === 9009) return true;
   return /is not recognized as an internal or external command/i.test(stderr);
 }
@@ -47,8 +165,9 @@ function normalizeExitError(
   command: string,
   args: readonly string[],
   result: ProcessRunResult,
+  runtimeEnvironment?: ServerRuntimeEnvironment,
 ): Error {
-  if (isWindowsCommandNotFound(result.code, result.stderr)) {
+  if (isWindowsCommandNotFound(result.code, result.stderr, runtimeEnvironment)) {
     return new Error(`Command not found: ${command}`);
   }
 
@@ -85,11 +204,30 @@ const DEFAULT_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
  * wrapper, leaving the actual command running. Use `taskkill /T` to kill the
  * entire process tree instead.
  */
-function killChild(child: ChildProcessHandle, signal: NodeJS.Signals = "SIGTERM"): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
+export function killProcessTree(
+  child: ChildProcessHandle,
+  options: {
+    runtimeEnvironment?: ServerRuntimeEnvironment | undefined;
+    signal?: NodeJS.Signals | undefined;
+  } = {},
+): void {
+  const signal = options.signal ?? "SIGTERM";
+  if (
+    resolveRuntimeEnvironment(options.runtimeEnvironment).platform === "windows" &&
+    child.pid !== undefined
+  ) {
     try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
+      const result = spawnProcessSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        shell: false,
+        runtimeEnvironment: options.runtimeEnvironment,
+      });
+      if (!result.error && result.status === 0) {
+        return;
+      }
+      if (result.error) {
+        throw result.error;
+      }
     } catch {
       // fallback to direct kill
     }
@@ -135,12 +273,7 @@ export async function runProcess(
   const outputMode = options.outputMode ?? "error";
 
   return new Promise<ProcessRunResult>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: "pipe",
-      shell: process.platform === "win32",
-    });
+    const child = spawnPipedProcess(command, args, options);
 
     let stdout = "";
     let stderr = "";
@@ -154,9 +287,15 @@ export async function runProcess(
 
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
-      killChild(child, "SIGTERM");
+      killProcessTree(child, {
+        runtimeEnvironment: options.runtimeEnvironment,
+        signal: "SIGTERM",
+      });
       forceKillTimer = setTimeout(() => {
-        killChild(child, "SIGKILL");
+        killProcessTree(child, {
+          runtimeEnvironment: options.runtimeEnvironment,
+          signal: "SIGKILL",
+        });
       }, 1_000);
     }, timeoutMs);
 
@@ -171,7 +310,10 @@ export async function runProcess(
     };
 
     const fail = (error: Error): void => {
-      killChild(child, "SIGTERM");
+      killProcessTree(child, {
+        runtimeEnvironment: options.runtimeEnvironment,
+        signal: "SIGTERM",
+      });
       finalize(() => {
         reject(error);
       });
@@ -244,7 +386,7 @@ export async function runProcess(
 
       finalize(() => {
         if (!options.allowNonZeroExit && (timedOut || (code !== null && code !== 0))) {
-          reject(normalizeExitError(command, args, result));
+          reject(normalizeExitError(command, args, result, options.runtimeEnvironment));
           return;
         }
         resolve(result);

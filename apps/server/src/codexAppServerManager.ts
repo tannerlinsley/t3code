@@ -1,4 +1,4 @@
-import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
+import { type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import readline from "node:readline";
@@ -18,6 +18,7 @@ import {
   type ProviderSessionStartInput,
   type ProviderTurnStartResult,
 } from "@t3tools/contracts";
+import { killProcessTree, spawnPipedProcess } from "./processRunner";
 
 type PendingRequestKey = string;
 
@@ -104,23 +105,6 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "does not exist",
 ];
 
-/**
- * On Windows with `shell: true`, `child.kill()` only terminates the `cmd.exe`
- * wrapper, leaving the actual command running. Use `taskkill /T` to kill the
- * entire process tree instead.
- */
-function killChildTree(child: ChildProcessWithoutNullStreams): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
-    try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    } catch {
-      // fallback to direct kill
-    }
-  }
-  child.kill();
-}
-
 export function normalizeCodexModelSlug(
   model: string | undefined | null,
   preferredId?: string,
@@ -195,14 +179,12 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
       const codexBinaryPath = input.codexBinaryPath ?? "codex";
       const codexHomePath = input.codexHomePath;
-      const child = spawn(codexBinaryPath, ["app-server"], {
+      const child = spawnPipedProcess(codexBinaryPath, ["app-server"], {
         cwd: resolvedCwd,
         env: {
           ...process.env,
           ...(codexHomePath ? { CODEX_HOME: codexHomePath } : {}),
         },
-        stdio: ["pipe", "pipe", "pipe"],
-        shell: process.platform === "win32",
       });
       const output = readline.createInterface({ input: child.stdout });
 
@@ -493,7 +475,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     context.output.close();
 
     if (!context.child.killed) {
-      killChildTree(context.child);
+      killProcessTree(context.child);
     }
 
     this.updateSession(context, {
