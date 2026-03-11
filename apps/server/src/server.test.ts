@@ -1,18 +1,51 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { WS_METHODS, WsRpcGroup } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Effect, FileSystem, Layer, Path, Stream } from "effect";
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
 import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
+import { Keybindings } from "./keybindings.ts";
+import { ProviderHealth } from "./provider/Services/ProviderHealth.ts";
+
+const wsRpcTestDepsLayer = Layer.mergeAll(
+  Layer.mock(Keybindings)({
+    loadConfigState: Effect.succeed({
+      keybindings: [],
+      issues: [],
+    }),
+    streamChanges: Stream.empty,
+  }),
+  Layer.mock(ProviderHealth)({
+    getStatuses: Effect.succeed([]),
+  }),
+);
 
 const AppUnderTest = HttpRouter.serve(makeRoutesLayer, {
   disableListenLog: true,
   disableLogger: true,
-});
+}).pipe(Layer.provideMerge(wsRpcTestDepsLayer));
+
+const wsRpcProtocolLayer = (wsUrl: string) =>
+  RpcClient.layerProtocolSocket().pipe(
+    Layer.provide(NodeSocket.layerWebSocket(wsUrl)),
+    Layer.provide(RpcSerialization.layerJson),
+  );
+
+const makeWsRpcClient = RpcClient.make(WsRpcGroup);
+type WsRpcClient =
+  typeof makeWsRpcClient extends Effect.Effect<infer Client, any, any> ? Client : never;
+
+const withWsRpcClient = <A, E, R>(
+  wsUrl: string,
+  f: (client: WsRpcClient) => Effect.Effect<A, E, R>,
+) => makeWsRpcClient.pipe(Effect.flatMap(f), Effect.provide(wsRpcProtocolLayer(wsUrl)));
 
 const buildWithTestConfig = (overrides?: { staticDir?: string; devUrl?: URL }) =>
   Effect.gen(function* () {
@@ -113,6 +146,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "/attachments/missing-11111111-1111-4111-8111-111111111111",
       );
       assert.equal(response.status, 404);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc server.getConfig", () =>
+    Effect.gen(function* () {
+      yield* buildWithTestConfig();
+
+      const server = yield* HttpServer.HttpServer;
+      const address = server.address as HttpServer.TcpAddress;
+      const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
+
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig](undefined)),
+      );
+
+      assert.equal(response.cwd, process.cwd());
+      assert.deepEqual(response.keybindings, []);
+      assert.deepEqual(response.issues, []);
+      assert.deepEqual(response.providers, []);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 });

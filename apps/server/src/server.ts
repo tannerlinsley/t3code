@@ -8,11 +8,13 @@ import { HttpRouter } from "effect/unstable/http";
 import { ServerConfig } from "./config";
 import { attachmentsRouteLayer, healthRouteLayer, staticAndDevRouteLayer } from "./http";
 import { fixPath } from "./os-jank";
+import { websocketRpcRouteLayer } from "./ws";
 
 export const makeRoutesLayer = Layer.mergeAll(
   healthRouteLayer,
   attachmentsRouteLayer,
   staticAndDevRouteLayer,
+  websocketRpcRouteLayer,
 );
 
 export const makeServerLayer = Layer.unwrap(
