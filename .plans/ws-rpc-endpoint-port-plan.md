@@ -71,7 +71,87 @@ Legend: `[x]` done, `[ ]` not started.
 - [x] `orchestration.getFullThreadDiff`
 - [x] `orchestration.replayEvents`
 
-## Notes
+### Phase 6: Streaming subscriptions via RPC (replace push-channel bridge)
 
-- This plan tracks request/response RPC methods only.
-- Push/event channels (`terminal.event`, `server.welcome`, `server.configUpdated`, `orchestration.domainEvent`) stay in the existing event pipeline until a dedicated push-channel migration plan is created.
+- [x] Define streaming RPC contracts for all server-driven event surfaces (reference pattern: `subscribeTodos`):
+  - [ ] `subscribeOrchestrationDomainEvents`
+  - [ ] `subscribeTerminalEvents`
+  - [ ] `subscribeServerConfigUpdates`
+  - [ ] `subscribeServerLifecycle` (welcome/readiness/bootstrap updates)
+- [ ] Add stream payload schemas in `packages/contracts` with narrow tagged unions where needed.
+  - [ ] Include explicit event versioning strategy (`version` or schema evolution note).
+  - [ ] Ensure payload shape parity with existing `WS_CHANNELS` semantics.
+- [ ] Implement streaming handlers in `apps/server/src/ws.ts` using `Effect.Stream`.
+  - [ ] Wire each stream to the correct source service/event bus.
+  - [ ] Preserve ordering guarantees where currently expected.
+  - [ ] Preserve filtering/scoping rules (thread/session/worktree as applicable).
+- [ ] Prove one full vertical slice first (recommended: terminal events), then fan out.
+  - [ ] Contract + handler + client consumer.
+  - [ ] Integration test: subscribe, receive at least one item, unsubscribe/interrupt cleanly.
+- [ ] Subscription lifecycle semantics (must match or improve current behavior):
+  - [ ] reconnect + resubscribe behavior
+  - [ ] duplicate subscription protection on reconnect
+  - [ ] cancellation/unsubscribe finalizers
+  - [ ] cleanup when socket closes unexpectedly
+- [ ] Reliability semantics:
+  - [ ] document and enforce backpressure strategy (buffer cap, drop policy, or disconnect)
+  - [ ] clarify delivery semantics (best-effort vs at-least-once) for each stream
+  - [ ] add metrics/logging for dropped/failed deliveries
+- [ ] Security/auth parity:
+  - [ ] apply same auth gating as request/response RPC path
+  - [ ] enforce per-stream permission checks
+- [ ] After parity, remove legacy push-channel publish paths and old envelope code paths for migrated streams.
+
+### Phase 7: Server startup/runtime side effects (move lifecycle out of legacy wsServer)
+
+- [ ] Move startup orchestration from `wsServer.ts` into layer-based runtime composition.
+  - [ ] keybindings startup + default sync behavior
+  - [ ] orchestration reactor startup
+  - [ ] terminal stream subscription lifecycle
+  - [ ] orchestration stream subscription lifecycle
+- [ ] Move startup UX/ops side effects:
+  - [ ] open-in-browser behavior
+  - [ ] startup heartbeat analytics
+  - [ ] startup logs payload parity
+  - [ ] optional auto-bootstrap project/thread from cwd
+- [ ] Preserve readiness and failure semantics:
+  - [ ] readiness gates for required subsystems
+  - [ ] startup failure behavior and error messages
+  - [ ] startup ordering guarantees and retry policy (if any)
+- [ ] Preserve shutdown semantics:
+  - [ ] finalizers/unsubscribe behavior
+  - [ ] ws server close behavior
+  - [ ] in-flight stream cancellation handling
+- [ ] Add lifecycle-focused integration tests (startup happy path + failure path + shutdown cleanup).
+
+### Phase 8: Client migration (full surface)
+
+- [ ] Migrate web client transport in `apps/web/src/ws.ts` to consume RPC contracts directly.
+  - [ ] Decide transport approach (custom adapter vs Effect `RpcClient`) and lock one path.
+- [ ] Request/response parity migration:
+  - [ ] replace legacy websocket envelope call helpers with typed RPC client calls
+  - [ ] ensure domain-specific error decoding/parsing parity
+- [ ] Streaming parity migration:
+  - [ ] consume new streaming RPC subscriptions for all migrated channels
+  - [ ] implement reconnect + resubscribe strategy
+  - [ ] enforce unsubscribe on route/session teardown
+- [ ] UX behavior parity:
+  - [ ] loading/connected/disconnected state transitions
+  - [ ] terminal/orchestration live updates timing and ordering
+  - [ ] welcome/bootstrap/config update behavior
+- [ ] Client tests:
+  - [ ] integration coverage for request calls
+  - [ ] subscription lifecycle tests (connect, receive, reconnect, teardown)
+
+### Phase 9: Final cleanup + deprecation removal
+
+- [ ] Delete legacy `wsServer.ts` transport path once server+client parity is proven.
+- [ ] Remove old shared protocol artifacts no longer needed:
+  - [ ] legacy `WS_CHANNELS` usage
+  - [ ] legacy ws envelope request/response codecs where obsolete
+  - [ ] dead helpers/services only used by legacy transport path
+- [ ] Run parity audit checklist before deletion:
+  - [ ] every old method mapped to RPC equivalent
+  - [ ] every old push channel mapped to streaming RPC equivalent
+  - [ ] auth/error/ordering semantics verified
+- [ ] Add migration note/changelog entry for downstream consumers (if any).

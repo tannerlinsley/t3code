@@ -27,6 +27,7 @@ import {
 import { KeybindingsConfigError } from "./keybindings";
 import {
   ClientOrchestrationCommand,
+  OrchestrationEvent,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
@@ -47,18 +48,31 @@ import {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
-import { ServerConfig, ServerUpsertKeybindingInput, ServerUpsertKeybindingResult } from "./server";
 import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
+  TerminalEvent,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
   TerminalWriteInput,
 } from "./terminal";
-import { WS_METHODS } from "./ws";
+import {
+  ServerConfigUpdatedPayload,
+  ServerConfig,
+  ServerUpsertKeybindingInput,
+  ServerUpsertKeybindingResult,
+} from "./server";
+import {
+  SubscribeOrchestrationDomainEventsInput,
+  SubscribeServerConfigUpdatesInput,
+  SubscribeServerLifecycleInput,
+  SubscribeTerminalEventsInput,
+  WS_METHODS,
+  WsWelcomePayload,
+} from "./ws";
 
 export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   success: ServerConfig,
@@ -216,6 +230,33 @@ export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   payload: OrchestrationReplayEventsInput,
   success: OrchestrationRpcSchemas.replayEvents.output,
   error: OrchestrationReplayEventsError,
+});
+
+export const WsSubscribeOrchestrationDomainEventsRpc = Rpc.make(
+  WS_METHODS.subscribeOrchestrationDomainEvents,
+  {
+    payload: SubscribeOrchestrationDomainEventsInput,
+    success: OrchestrationEvent,
+    stream: true,
+  },
+);
+
+export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
+  payload: SubscribeTerminalEventsInput,
+  success: TerminalEvent,
+  stream: true,
+});
+
+export const WsSubscribeServerConfigUpdatesRpc = Rpc.make(WS_METHODS.subscribeServerConfigUpdates, {
+  payload: SubscribeServerConfigUpdatesInput,
+  success: ServerConfigUpdatedPayload,
+  stream: true,
+});
+
+export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecycle, {
+  payload: SubscribeServerLifecycleInput,
+  success: WsWelcomePayload,
+  stream: true,
 });
 
 export const WsRpcGroup = RpcGroup.make(
