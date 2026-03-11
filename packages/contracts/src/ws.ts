@@ -79,6 +79,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeOrchestrationDomainEvents: "subscribeOrchestrationDomainEvents",
   subscribeTerminalEvents: "subscribeTerminalEvents",
+  subscribeServerConfig: "subscribeServerConfig",
   subscribeServerConfigUpdates: "subscribeServerConfigUpdates",
   subscribeServerLifecycle: "subscribeServerLifecycle",
 } as const;
@@ -239,6 +240,9 @@ export type SubscribeOrchestrationDomainEventsInput =
 
 export const SubscribeTerminalEventsInput = Schema.Struct({});
 export type SubscribeTerminalEventsInput = typeof SubscribeTerminalEventsInput.Type;
+
+export const SubscribeServerConfigInput = Schema.Struct({});
+export type SubscribeServerConfigInput = typeof SubscribeServerConfigInput.Type;
 
 export const SubscribeServerConfigUpdatesInput = Schema.Struct({});
 export type SubscribeServerConfigUpdatesInput = typeof SubscribeServerConfigUpdatesInput.Type;

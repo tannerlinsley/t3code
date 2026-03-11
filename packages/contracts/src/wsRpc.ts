@@ -60,24 +60,18 @@ import {
   TerminalWriteInput,
 } from "./terminal";
 import {
-  ServerConfigUpdatedPayload,
-  ServerConfig,
+  ServerConfigStreamEvent,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server";
 import {
   SubscribeOrchestrationDomainEventsInput,
-  SubscribeServerConfigUpdatesInput,
+  SubscribeServerConfigInput,
   SubscribeServerLifecycleInput,
   SubscribeTerminalEventsInput,
   WS_METHODS,
   WsWelcomePayload,
 } from "./ws";
-
-export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
-  success: ServerConfig,
-  error: KeybindingsConfigError,
-});
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
@@ -247,9 +241,10 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
-export const WsSubscribeServerConfigUpdatesRpc = Rpc.make(WS_METHODS.subscribeServerConfigUpdates, {
-  payload: SubscribeServerConfigUpdatesInput,
-  success: ServerConfigUpdatedPayload,
+export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
+  payload: SubscribeServerConfigInput,
+  success: ServerConfigStreamEvent,
+  error: KeybindingsConfigError,
   stream: true,
 });
 
@@ -260,7 +255,6 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
 });
 
 export const WsRpcGroup = RpcGroup.make(
-  WsServerGetConfigRpc,
   WsServerUpsertKeybindingRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
@@ -282,6 +276,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
+  WsSubscribeTerminalEventsRpc,
+  WsSubscribeServerConfigRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

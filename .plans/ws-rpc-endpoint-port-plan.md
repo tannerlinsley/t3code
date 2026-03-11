@@ -31,7 +31,7 @@ Legend: `[x]` done, `[ ]` not started.
 
 ### Phase 1: Server metadata (smallest surface)
 
-- [x] `server.getConfig`
+- [x] `server.getConfig` (now retired in favor of `subscribeServerConfig` snapshot-first stream)
 - [x] `server.upsertKeybinding`
 
 ### Phase 2: Project + editor read/write (small inputs, bounded side effects)
@@ -75,19 +75,25 @@ Legend: `[x]` done, `[ ]` not started.
 
 - [x] Define streaming RPC contracts for all server-driven event surfaces (reference pattern: `subscribeTodos`):
   - [ ] `subscribeOrchestrationDomainEvents`
-  - [ ] `subscribeTerminalEvents`
-  - [ ] `subscribeServerConfigUpdates`
+  - [x] `subscribeTerminalEvents`
+  - [x] `subscribeServerConfig` (snapshot + keybindings updates + provider status heartbeat)
   - [ ] `subscribeServerLifecycle` (welcome/readiness/bootstrap updates)
 - [ ] Add stream payload schemas in `packages/contracts` with narrow tagged unions where needed.
   - [ ] Include explicit event versioning strategy (`version` or schema evolution note).
   - [ ] Ensure payload shape parity with existing `WS_CHANNELS` semantics.
 - [ ] Implement streaming handlers in `apps/server/src/ws.ts` using `Effect.Stream`.
-  - [ ] Wire each stream to the correct source service/event bus.
+  - [x] Wire first stream (`subscribeTerminalEvents`) to the correct source service/event bus.
+  - [x] Wire `subscribeServerConfig` to emit snapshot first, then live updates.
   - [ ] Preserve ordering guarantees where currently expected.
   - [ ] Preserve filtering/scoping rules (thread/session/worktree as applicable).
 - [ ] Prove one full vertical slice first (recommended: terminal events), then fan out.
-  - [ ] Contract + handler + client consumer.
-  - [ ] Integration test: subscribe, receive at least one item, unsubscribe/interrupt cleanly.
+  - [x] Contract + handler + client consumer.
+  - [x] Integration test: subscribe, receive at least one item, unsubscribe/interrupt cleanly.
+  - [x] Integration test: `subscribeServerConfig` emits initial snapshot and update event.
+  - [x] Integration test: provider-status heartbeat verified with Effect `TestClock.adjust`.
+- [x] Remove superseded server-config RPCs that are now covered by stream semantics.
+  - [x] Remove `server.getConfig`.
+  - [x] Remove `subscribeServerConfigUpdates`.
 - [ ] Subscription lifecycle semantics (must match or improve current behavior):
   - [ ] reconnect + resubscribe behavior
   - [ ] duplicate subscription protection on reconnect

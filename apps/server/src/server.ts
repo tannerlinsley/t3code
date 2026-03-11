@@ -8,7 +8,27 @@ import { HttpRouter } from "effect/unstable/http";
 import { ServerConfig } from "./config";
 import { attachmentsRouteLayer, healthRouteLayer, staticAndDevRouteLayer } from "./http";
 import { fixPath } from "./os-jank";
+import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
+import { TerminalManagerLive } from "./terminal/Layers/Manager";
+import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { websocketRpcRouteLayer } from "./ws";
+import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
+import { KeybindingsLive } from "./keybindings";
+
+const terminalManagerLayer = TerminalManagerLive.pipe(
+  Layer.provide(
+    typeof Bun !== "undefined" && process.platform !== "win32"
+      ? BunPtyAdapterLive
+      : NodePtyAdapterLive,
+  ),
+);
+
+const runtimeServicesLayer = Layer.mergeAll(
+  terminalManagerLayer,
+  ProviderHealthLive,
+  KeybindingsLive,
+  /// other runtime services
+);
 
 export const makeRoutesLayer = Layer.mergeAll(
   healthRouteLayer,
@@ -26,7 +46,10 @@ export const makeServerLayer = Layer.unwrap(
     yield* Effect.sync(fixPath);
     return HttpRouter.serve(makeRoutesLayer, {
       disableLogger: !config.logWebSocketEvents,
-    }).pipe(Layer.provide(NodeHttpServer.layer(Http.createServer, listenOptions)));
+    }).pipe(
+      Layer.provide(runtimeServicesLayer),
+      Layer.provide(NodeHttpServer.layer(Http.createServer, listenOptions)),
+    );
   }),
 );
 

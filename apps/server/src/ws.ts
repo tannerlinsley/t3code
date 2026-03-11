@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Layer, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Layer, Path, Schema, Stream, PubSub } from "effect";
 import {
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
@@ -8,6 +8,7 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -99,23 +100,6 @@ const WsRpcLayer = WsRpcGroup.toLayer({
           }),
       ),
     ),
-  [WS_METHODS.serverGetConfig]: () =>
-    Effect.gen(function* () {
-      const config = yield* ServerConfig;
-      const keybindings = yield* Keybindings;
-      const providerHealth = yield* ProviderHealth;
-      const keybindingsConfig = yield* keybindings.loadConfigState;
-      const providers = yield* providerHealth.getStatuses;
-
-      return {
-        cwd: config.cwd,
-        keybindingsConfigPath: config.keybindingsConfigPath,
-        keybindings: keybindingsConfig.keybindings,
-        issues: keybindingsConfig.issues,
-        providers,
-        availableEditors: resolveAvailableEditors(),
-      };
-    }),
   [WS_METHODS.serverUpsertKeybinding]: (rule) =>
     Effect.gen(function* () {
       const keybindings = yield* Keybindings;
@@ -249,6 +233,63 @@ const WsRpcLayer = WsRpcGroup.toLayer({
       const terminalManager = yield* TerminalManager;
       return yield* terminalManager.close(input);
     }),
+  [WS_METHODS.subscribeTerminalEvents]: (_input) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const terminalManager = yield* TerminalManager;
+        const pubsub = yield* PubSub.unbounded<TerminalEvent>();
+        const unsubscribe = yield* terminalManager.subscribe((event) => {
+          PubSub.publishUnsafe(pubsub, event);
+        });
+        return Stream.fromPubSub(pubsub).pipe(Stream.ensuring(Effect.sync(() => unsubscribe())));
+      }),
+    ),
+  [WS_METHODS.subscribeServerConfig]: (_input) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        const providerHealth = yield* ProviderHealth;
+        const config = yield* ServerConfig;
+        const keybindingsConfig = yield* keybindings.loadConfigState;
+        const providers = yield* providerHealth.getStatuses;
+
+        const keybindingsUpdates = keybindings.streamChanges.pipe(
+          Stream.mapEffect((event) =>
+            Effect.succeed({
+              type: "keybindingsUpdated" as const,
+              payload: {
+                issues: event.issues,
+              },
+            }),
+          ),
+        );
+        const providerStatuses = Stream.tick("10 seconds").pipe(
+          Stream.mapEffect(() =>
+            Effect.gen(function* () {
+              const providers = yield* providerHealth.getStatuses;
+              return {
+                type: "providerStatuses" as const,
+                payload: { providers },
+              };
+            }),
+          ),
+        );
+        return Stream.concat(
+          Stream.make({
+            type: "snapshot" as const,
+            config: {
+              cwd: config.cwd,
+              keybindingsConfigPath: config.keybindingsConfigPath,
+              keybindings: keybindingsConfig.keybindings,
+              issues: keybindingsConfig.issues,
+              providers,
+              availableEditors: resolveAvailableEditors(),
+            },
+          }),
+          Stream.merge(keybindingsUpdates, providerStatuses),
+        );
+      }),
+    ),
 });
 
 export const websocketRpcRouteLayer = RpcServer.layerHttp({

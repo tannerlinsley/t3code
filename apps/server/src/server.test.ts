@@ -16,7 +16,8 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
-import { Effect, FileSystem, Layer, Path, Stream } from "effect";
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
@@ -30,7 +31,7 @@ import {
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
-import { Keybindings, KeybindingsConfigError, type KeybindingsShape } from "./keybindings.ts";
+import { Keybindings, type KeybindingsShape } from "./keybindings.ts";
 import { Open, type OpenShape } from "./open.ts";
 import {
   OrchestrationEngineService,
@@ -303,31 +304,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("routes websocket rpc server.getConfig", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        layers: {
-          keybindings: {
-            loadConfigState: Effect.succeed({
-              keybindings: [],
-              issues: [],
-            }),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]()),
-      );
-
-      assert.equal(response.cwd, process.cwd());
-      assert.deepEqual(response.keybindings, []);
-      assert.deepEqual(response.issues, []);
-      assert.deepEqual(response.providers, []);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
   it.effect("routes websocket rpc server.upsertKeybinding", () =>
     Effect.gen(function* () {
       const rule: KeybindingRule = {
@@ -364,29 +340,98 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("routes websocket rpc server.getConfig errors", () =>
+  it.effect("routes websocket rpc subscribeServerConfig streams snapshot then update", () =>
     Effect.gen(function* () {
-      const error = new KeybindingsConfigError({
-        configPath: "/tmp/keybindings.json",
-        detail: "expected JSON array",
-      });
+      const providers = [] as const;
+      const changeEvent = {
+        keybindings: [],
+        issues: [],
+      } as const;
+
       yield* buildAppUnderTest({
         layers: {
           keybindings: {
-            loadConfigState: Effect.fail(error),
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.succeed(changeEvent),
+          },
+          providerHealth: {
+            getStatuses: Effect.succeed(providers),
           },
         },
       });
 
       const wsUrl = yield* getWsServerUrl("/ws");
-      const result = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]()).pipe(
-          Effect.result,
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(2), Stream.runCollect),
         ),
       );
 
-      assertFailure(result, error);
+      const [first, second] = Array.from(events);
+      assert.equal(first?.type, "snapshot");
+      if (first?.type === "snapshot") {
+        assert.deepEqual(first.config.keybindings, []);
+        assert.deepEqual(first.config.issues, []);
+        assert.deepEqual(first.config.providers, providers);
+      }
+      assert.deepEqual(second, {
+        type: "keybindingsUpdated",
+        payload: { issues: [] },
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc subscribeServerConfig emits providerStatuses heartbeat", () =>
+    Effect.gen(function* () {
+      const providers = [] as const;
+
+      yield* buildAppUnderTest({
+        layers: {
+          keybindings: {
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.empty,
+          },
+          providerHealth: {
+            getStatuses: Effect.succeed(providers),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const snapshotReceived = yield* Deferred.make<void>();
+          const eventsFiber = yield* withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeServerConfig]({}).pipe(
+              Stream.tap((event) =>
+                event.type === "snapshot"
+                  ? Deferred.succeed(snapshotReceived, undefined).pipe(Effect.ignore)
+                  : Effect.void,
+              ),
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ).pipe(Effect.forkScoped);
+
+          yield* Deferred.await(snapshotReceived);
+          yield* TestClock.adjust("10 seconds");
+          return yield* Fiber.join(eventsFiber);
+        }),
+      );
+
+      const [first, second] = Array.from(events);
+      assert.equal(first?.type, "snapshot");
+      assert.deepEqual(second, {
+        type: "providerStatuses",
+        payload: { providers },
+      });
+    }).pipe(Effect.provide(Layer.mergeAll(NodeHttpServer.layerTest, TestClock.layer()))),
   );
 
   it.effect("routes websocket rpc projects.searchEntries", () =>
