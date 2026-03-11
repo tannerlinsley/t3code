@@ -158,7 +158,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const wsUrl = `ws://127.0.0.1:${address.port}/ws`;
 
       const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig](undefined)),
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]()),
       );
 
       assert.equal(response.cwd, process.cwd());
