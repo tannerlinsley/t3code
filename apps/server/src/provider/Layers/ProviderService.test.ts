@@ -52,7 +52,7 @@ const asTurnId = (value: string): TurnId => TurnId.makeUnsafe(value);
 type LegacyProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: "codex" | "claudeCode" | "cursor";
+  readonly provider: "codex" | "claudeCode";
   readonly createdAt: string;
   readonly threadId: ThreadId;
   readonly turnId?: string | undefined;
@@ -74,7 +74,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
         status: "ready",
         runtimeMode: input.runtimeMode,
         threadId: input.threadId,
-        resumeCursor: input.resumeCursor ?? { opaque: `cursor-${String(input.threadId)}` },
+        resumeCursor: input.resumeCursor ?? { opaque: `resume-${String(input.threadId)}` },
         cwd: input.cwd ?? process.cwd(),
         createdAt: now,
         updatedAt: now,

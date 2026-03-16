@@ -21,14 +21,10 @@ describe("normalizeCustomModelSlugs", () => {
     ).toEqual(["custom/internal-model"]);
   });
 
-  it("normalizes provider-specific aliases for claude and cursor", () => {
+  it("normalizes provider-specific aliases for claude", () => {
     expect(normalizeCustomModelSlugs(["sonnet"], "claudeCode")).toEqual([]);
     expect(normalizeCustomModelSlugs(["claude/custom-sonnet"], "claudeCode")).toEqual([
       "claude/custom-sonnet",
-    ]);
-    expect(normalizeCustomModelSlugs(["composer"], "cursor")).toEqual([]);
-    expect(normalizeCustomModelSlugs(["cursor/custom-model"], "cursor")).toEqual([
-      "cursor/custom-model",
     ]);
   });
 });
@@ -86,9 +82,7 @@ describe("timestamp format defaults", () => {
 describe("provider-specific custom models", () => {
   it("includes provider-specific custom slugs in non-codex model lists", () => {
     const claudeOptions = getAppModelOptions("claudeCode", ["claude/custom-opus"]);
-    const cursorOptions = getAppModelOptions("cursor", ["cursor/custom-model"]);
 
     expect(claudeOptions.some((option) => option.slug === "claude/custom-opus")).toBe(true);
-    expect(cursorOptions.some((option) => option.slug === "cursor/custom-model")).toBe(true);
   });
 });

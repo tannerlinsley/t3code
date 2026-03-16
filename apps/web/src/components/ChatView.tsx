@@ -504,9 +504,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => ({
       codex: settings.customCodexModels,
       claudeCode: settings.customClaudeModels,
-      cursor: settings.customCursorModels,
     }),
-    [settings.customClaudeModels, settings.customCodexModels, settings.customCursorModels],
+    [settings.customClaudeModels, settings.customCodexModels],
   );
   const customModelsForSelectedProvider = customModelsByProvider[selectedProvider];
   const selectedModel = useMemo(() => {

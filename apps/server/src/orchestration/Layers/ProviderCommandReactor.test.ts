@@ -96,9 +96,7 @@ describe("ProviderCommandReactor", () => {
         typeof input === "object" &&
         input !== null &&
         "provider" in input &&
-        (input.provider === "codex" ||
-          input.provider === "claudeCode" ||
-          input.provider === "cursor")
+        (input.provider === "codex" || input.provider === "claudeCode")
           ? input.provider
           : "codex";
       const resumeCursor =
@@ -131,7 +129,7 @@ describe("ProviderCommandReactor", () => {
             : "full-access",
         ...(model !== undefined ? { model } : {}),
         threadId,
-        resumeCursor: resumeCursor ?? { opaque: `cursor-${sessionIndex}` },
+        resumeCursor: resumeCursor ?? { opaque: `resume-${sessionIndex}` },
         createdAt: now,
         updatedAt: now,
       };
@@ -428,42 +426,6 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
   });
 
-  it("starts first turn with cursor provider when provider is specified", async () => {
-    const harness = await createHarness();
-    const now = new Date().toISOString();
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.makeUnsafe("cmd-turn-start-provider-cursor"),
-        threadId: ThreadId.makeUnsafe("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-provider-cursor"),
-          role: "user",
-          text: "hello cursor",
-          attachments: [],
-        },
-        provider: "cursor",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      provider: "cursor",
-      cwd: "/tmp/provider-project",
-      model: "gpt-5-codex",
-      runtimeMode: "approval-required",
-    });
-
-    const readModel = await Effect.runPromise(harness.engine.getReadModel());
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.makeUnsafe("thread-1"));
-    expect(thread?.session?.providerName).toBe("cursor");
-    expect(thread?.session?.threadId).toBe("thread-1");
-  });
   it("reuses the same provider session when runtime mode is unchanged", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -584,7 +546,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.stopSession.mock.calls.length).toBe(0);
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
       threadId: ThreadId.makeUnsafe("thread-1"),
-      resumeCursor: { opaque: "cursor-1" },
+      resumeCursor: { opaque: "resume-1" },
       runtimeMode: "approval-required",
     });
     expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({

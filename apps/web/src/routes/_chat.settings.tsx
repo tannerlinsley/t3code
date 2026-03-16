@@ -76,8 +76,6 @@ function getCustomModelsForProvider(
   switch (provider) {
     case "claudeCode":
       return settings.customClaudeModels;
-    case "cursor":
-      return settings.customCursorModels;
     case "codex":
     default:
       return settings.customCodexModels;
@@ -91,8 +89,6 @@ function getDefaultCustomModelsForProvider(
   switch (provider) {
     case "claudeCode":
       return defaults.customClaudeModels;
-    case "cursor":
-      return defaults.customCursorModels;
     case "codex":
     default:
       return defaults.customCodexModels;
@@ -103,8 +99,6 @@ function patchCustomModels(provider: ProviderKind, models: string[]) {
   switch (provider) {
     case "claudeCode":
       return { customClaudeModels: models };
-    case "cursor":
-      return { customCursorModels: models };
     case "codex":
     default:
       return { customCodexModels: models };
@@ -122,7 +116,6 @@ function SettingsRouteView() {
   >({
     codex: "",
     claudeCode: "",
-    cursor: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>

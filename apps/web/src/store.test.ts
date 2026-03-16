@@ -226,28 +226,6 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.model).toBe("claude-sonnet-4-6");
   });
 
-  it("resolves cursor aliases when session provider is cursor", () => {
-    const initialState = makeState(makeThread());
-    const readModel = makeReadModel(
-      makeReadModelThread({
-        model: "composer",
-        session: {
-          threadId: ThreadId.makeUnsafe("thread-1"),
-          status: "ready",
-          providerName: "cursor",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-02-27T00:00:00.000Z",
-        },
-      }),
-    );
-
-    const next = syncServerReadModel(initialState, readModel);
-
-    expect(next.threads[0]?.model).toBe("composer-1.5");
-  });
-
   it("preserves the current project order when syncing incoming read model updates", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");

@@ -35,7 +35,7 @@ export interface TestTurnResponse {
 export type FixtureProviderRuntimeEvent = {
   readonly type: string;
   readonly eventId: EventId;
-  readonly provider: "codex" | "claudeCode" | "cursor";
+  readonly provider: "codex" | "claudeCode";
   readonly createdAt: string;
   readonly threadId: string;
   readonly turnId?: string | undefined;
