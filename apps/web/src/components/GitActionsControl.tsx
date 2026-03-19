@@ -593,38 +593,23 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       ...(filePaths ? { filePaths } : {}),
       skipDefaultBranchPrompt: true,
     });
-  }, [pendingDefaultBranchAction, runGitActionWithToast]);
-
-  const checkoutNewBranchAndRunAction = useCallback(
-    (actionParams: {
-      action: GitStackedAction;
-      commitMessage?: string;
-      forcePushOnlyProgress?: boolean;
-      onConfirmed?: () => void;
-      filePaths?: string[];
-    }) => {
-      void runGitActionWithToast({
-        ...actionParams,
-        featureBranch: true,
-        skipDefaultBranchPrompt: true,
-      });
-    },
-    [runGitActionWithToast],
-  );
+  }, [pendingDefaultBranchAction]);
 
   const checkoutFeatureBranchAndContinuePendingAction = useCallback(() => {
     if (!pendingDefaultBranchAction) return;
     const { action, commitMessage, forcePushOnlyProgress, onConfirmed, filePaths } =
       pendingDefaultBranchAction;
     setPendingDefaultBranchAction(null);
-    checkoutNewBranchAndRunAction({
+    void runGitActionWithToast({
       action,
       ...(commitMessage ? { commitMessage } : {}),
       forcePushOnlyProgress,
       ...(onConfirmed ? { onConfirmed } : {}),
       ...(filePaths ? { filePaths } : {}),
+      featureBranch: true,
+      skipDefaultBranchPrompt: true,
     });
-  }, [pendingDefaultBranchAction, checkoutNewBranchAndRunAction]);
+  }, [pendingDefaultBranchAction]);
 
   const runDialogActionOnNewBranch = useCallback(() => {
     if (!isCommitDialogOpen) return;
@@ -635,18 +620,14 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     setExcludedFiles(new Set());
     setIsEditingFiles(false);
 
-    checkoutNewBranchAndRunAction({
+    void runGitActionWithToast({
       action: "commit",
       ...(commitMessage ? { commitMessage } : {}),
       ...(!allSelected ? { filePaths: selectedFiles.map((f) => f.path) } : {}),
+      featureBranch: true,
+      skipDefaultBranchPrompt: true,
     });
-  }, [
-    allSelected,
-    isCommitDialogOpen,
-    dialogCommitMessage,
-    checkoutNewBranchAndRunAction,
-    selectedFiles,
-  ]);
+  }, [allSelected, isCommitDialogOpen, dialogCommitMessage, selectedFiles]);
 
   const runQuickAction = useCallback(() => {
     if (quickAction.kind === "open_pr") {
@@ -686,7 +667,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     if (quickAction.action) {
       void runGitActionWithToast({ action: quickAction.action });
     }
-  }, [openExistingPr, pullMutation, quickAction, runGitActionWithToast, threadToastData]);
+  }, [openExistingPr, pullMutation, quickAction, threadToastData]);
 
   const openDialogForMenuItem = useCallback(
     (item: GitActionMenuItem) => {
@@ -707,7 +688,7 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
       setIsEditingFiles(false);
       setIsCommitDialogOpen(true);
     },
-    [openExistingPr, runGitActionWithToast, setIsCommitDialogOpen],
+    [openExistingPr, setIsCommitDialogOpen],
   );
 
   const runDialogAction = useCallback(() => {
@@ -726,7 +707,6 @@ export default function GitActionsControl({ gitCwd, activeThreadId }: GitActions
     allSelected,
     dialogCommitMessage,
     isCommitDialogOpen,
-    runGitActionWithToast,
     selectedFiles,
     setDialogCommitMessage,
     setIsCommitDialogOpen,
