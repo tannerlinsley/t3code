@@ -40,6 +40,7 @@ export interface WorkLogEntry {
   command?: string;
   changedFiles?: ReadonlyArray<string>;
   tone: "thinking" | "tool" | "info" | "error";
+  display?: "timeline-marker";
   toolTitle?: string;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
@@ -521,6 +522,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (requestKind) {
     entry.requestKind = requestKind;
+  }
+  if (activity.kind === "context-compaction") {
+    entry.display = "timeline-marker";
   }
   const collapseKey = deriveToolLifecycleCollapseKey(entry);
   if (collapseKey) {

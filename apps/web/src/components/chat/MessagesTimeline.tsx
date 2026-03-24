@@ -147,11 +147,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }
 
       if (timelineEntry.kind === "work") {
+        if (timelineEntry.entry.display === "timeline-marker") {
+          nextRows.push({
+            kind: "work",
+            id: timelineEntry.id,
+            createdAt: timelineEntry.createdAt,
+            groupedEntries: [timelineEntry.entry],
+          });
+          continue;
+        }
         const groupedEntries = [timelineEntry.entry];
         let cursor = index + 1;
         while (cursor < timelineEntries.length) {
           const nextEntry = timelineEntries[cursor];
-          if (!nextEntry || nextEntry.kind !== "work") break;
+          if (
+            !nextEntry ||
+            nextEntry.kind !== "work" ||
+            nextEntry.entry.display === "timeline-marker"
+          )
+            break;
           groupedEntries.push(nextEntry.entry);
           cursor += 1;
         }
@@ -314,6 +328,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         (() => {
           const groupId = row.id;
           const groupedEntries = row.groupedEntries;
+          const markerEntry =
+            groupedEntries.length === 1 && groupedEntries[0]?.display === "timeline-marker"
+              ? groupedEntries[0]
+              : null;
+          if (markerEntry) {
+            return (
+              <div className="my-3 flex items-center gap-3">
+                <span className="h-px flex-1 bg-border" />
+                <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+                  {markerEntry.label}
+                </span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            );
+          }
           const isExpanded = expandedWorkGroups[groupId] ?? false;
           const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES;
           const visibleEntries =
