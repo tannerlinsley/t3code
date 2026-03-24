@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderKind,
   ThreadId,
+  ModelSelection,
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option, Schema } from "effect";
@@ -145,7 +146,7 @@ const startTurn = (input: {
   readonly commandId: string;
   readonly messageId: string;
   readonly text: string;
-  readonly provider?: IntegrationProvider;
+  readonly modelSelection?: ModelSelection;
 }) =>
   input.harness.engine.dispatch({
     type: "thread.turn.start",
@@ -157,12 +158,9 @@ const startTurn = (input: {
       text: input.text,
       attachments: [],
     },
-    ...(input.provider !== undefined
+    ...(input.modelSelection !== undefined
       ? {
-          modelSelection: {
-            provider: input.provider,
-            model: DEFAULT_MODEL_BY_PROVIDER[input.provider],
-          },
+          modelSelection: input.modelSelection,
         }
       : {}),
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -941,7 +939,10 @@ it.live("starts a claudeAgent session on first turn when provider is requested",
           commandId: "cmd-turn-start-claude-initial",
           messageId: "msg-user-claude-initial",
           text: "Use Claude",
-          provider: "claudeAgent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
         });
 
         const thread = yield* harness.waitForThread(
@@ -995,7 +996,10 @@ it.live("recovers claudeAgent sessions after provider stopAll using persisted re
           commandId: "cmd-turn-start-claude-recover-1",
           messageId: "msg-user-claude-recover-1",
           text: "Before restart",
-          provider: "claudeAgent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
         });
 
         yield* harness.waitForThread(
@@ -1102,7 +1106,10 @@ it.live("forwards claudeAgent approval responses to the provider session", () =>
           commandId: "cmd-turn-start-claude-approval",
           messageId: "msg-user-claude-approval",
           text: "Need approval",
-          provider: "claudeAgent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
         });
 
         const thread = yield* harness.waitForThread(THREAD_ID, (entry) =>
@@ -1171,7 +1178,10 @@ it.live("forwards thread.turn.interrupt to claudeAgent provider sessions", () =>
           commandId: "cmd-turn-start-claude-interrupt",
           messageId: "msg-user-claude-interrupt",
           text: "Start long turn",
-          provider: "claudeAgent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
         });
 
         const thread = yield* harness.waitForThread(
@@ -1241,7 +1251,10 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
           commandId: "cmd-turn-start-claude-revert-1",
           messageId: "msg-user-claude-revert-1",
           text: "First Claude edit",
-          provider: "claudeAgent",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
         });
 
         yield* harness.waitForThread(
