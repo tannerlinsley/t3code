@@ -34,6 +34,8 @@ import { useTheme } from "../hooks/useTheme";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { cn } from "../lib/utils";
 import { ensureNativeApi, readNativeApi } from "../nativeApi";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { Equal } from "effect";
 
 const THEME_OPTIONS = [
   {
@@ -185,7 +187,7 @@ function SettingResetButton({ label, onClick }: { label: string; onClick: () => 
 function SettingsRouteView() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
-  const { updateSettings, resetSettings, defaults } = useUpdateSettings();
+  const { updateSettings, resetSettings } = useUpdateSettings();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
@@ -239,22 +241,31 @@ function SettingsRouteView() {
     ? savedCustomModelRows
     : savedCustomModelRows.slice(0, 5);
   const isInstallSettingsDirty =
-    settings.providers.claudeAgent.binaryPath !== defaults.providers.claudeAgent.binaryPath ||
-    settings.providers.codex.binaryPath !== defaults.providers.codex.binaryPath ||
-    settings.providers.codex.homePath !== defaults.providers.codex.homePath;
+    settings.providers.claudeAgent.binaryPath !==
+      DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath ||
+    settings.providers.codex.binaryPath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
+    settings.providers.codex.homePath !== DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath;
   const changedSettingLabels = [
     ...(theme !== "system" ? ["Theme"] : []),
-    ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
-    ...(settings.diffWordWrap !== defaults.diffWordWrap ? ["Diff line wrapping"] : []),
-    ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
+    ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
+      ? ["Time format"]
+      : []),
+    ...(settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap
+      ? ["Diff line wrapping"]
+      : []),
+    ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
       ? ["Assistant output"]
       : []),
-    ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
-    ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
+    ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
+      ? ["New thread mode"]
+      : []),
+    ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
       ? ["Delete confirmation"]
       : []),
-    ...(JSON.stringify(settings.textGenerationModelSelection ?? null) !==
-    JSON.stringify(defaults.textGenerationModelSelection ?? null)
+    ...(Equal.equals(
+      settings.textGenerationModelSelection ?? null,
+      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+    )
       ? ["Git writing model"]
       : []),
     ...(settings.providers.codex.customModels.length > 0 ||
@@ -468,12 +479,12 @@ function SettingsRouteView() {
                 title="Time format"
                 description="System default follows your browser or OS clock preference."
                 resetAction={
-                  settings.timestampFormat !== defaults.timestampFormat ? (
+                  settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat ? (
                     <SettingResetButton
                       label="time format"
                       onClick={() =>
                         updateSettings({
-                          timestampFormat: defaults.timestampFormat,
+                          timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
                         })
                       }
                     />
@@ -513,12 +524,12 @@ function SettingsRouteView() {
                 title="Diff line wrapping"
                 description="Set the default wrap state when the diff panel opens. The in-panel wrap toggle only affects the current diff session."
                 resetAction={
-                  settings.diffWordWrap !== defaults.diffWordWrap ? (
+                  settings.diffWordWrap !== DEFAULT_UNIFIED_SETTINGS.diffWordWrap ? (
                     <SettingResetButton
                       label="diff line wrapping"
                       onClick={() =>
                         updateSettings({
-                          diffWordWrap: defaults.diffWordWrap,
+                          diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
                         })
                       }
                     />
@@ -541,12 +552,14 @@ function SettingsRouteView() {
                 title="Assistant output"
                 description="Show token-by-token output while a response is in progress."
                 resetAction={
-                  settings.enableAssistantStreaming !== defaults.enableAssistantStreaming ? (
+                  settings.enableAssistantStreaming !==
+                  DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming ? (
                     <SettingResetButton
                       label="assistant output"
                       onClick={() =>
                         updateSettings({
-                          enableAssistantStreaming: defaults.enableAssistantStreaming,
+                          enableAssistantStreaming:
+                            DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
                         })
                       }
                     />
@@ -569,12 +582,13 @@ function SettingsRouteView() {
                 title="New threads"
                 description="Pick the default workspace mode for newly created draft threads."
                 resetAction={
-                  settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? (
+                  settings.defaultThreadEnvMode !==
+                  DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
                     <SettingResetButton
                       label="new threads"
                       onClick={() =>
                         updateSettings({
-                          defaultThreadEnvMode: defaults.defaultThreadEnvMode,
+                          defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
                         })
                       }
                     />
@@ -611,12 +625,12 @@ function SettingsRouteView() {
                 title="Delete confirmation"
                 description="Ask before deleting a thread and its chat history."
                 resetAction={
-                  settings.confirmThreadDelete !== defaults.confirmThreadDelete ? (
+                  settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete ? (
                     <SettingResetButton
                       label="delete confirmation"
                       onClick={() =>
                         updateSettings({
-                          confirmThreadDelete: defaults.confirmThreadDelete,
+                          confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
                         })
                       }
                     />
@@ -642,12 +656,13 @@ function SettingsRouteView() {
                 description="Provider and model used for auto-generated git content."
                 resetAction={
                   JSON.stringify(settings.textGenerationModelSelection ?? null) !==
-                  JSON.stringify(defaults.textGenerationModelSelection ?? null) ? (
+                  JSON.stringify(DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null) ? (
                     <SettingResetButton
                       label="git writing model"
                       onClick={() => {
                         updateSettings({
-                          textGenerationModelSelection: defaults.textGenerationModelSelection,
+                          textGenerationModelSelection:
+                            DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
                         });
                       }}
                     />
@@ -710,11 +725,12 @@ function SettingsRouteView() {
                             ...settings.providers,
                             codex: {
                               ...settings.providers.codex,
-                              customModels: defaults.providers.codex.customModels,
+                              customModels: DEFAULT_UNIFIED_SETTINGS.providers.codex.customModels,
                             },
                             claudeAgent: {
                               ...settings.providers.claudeAgent,
-                              customModels: defaults.providers.claudeAgent.customModels,
+                              customModels:
+                                DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.customModels,
                             },
                           },
                         });
@@ -851,12 +867,12 @@ function SettingsRouteView() {
                             ...settings.providers,
                             claudeAgent: {
                               ...settings.providers.claudeAgent,
-                              binaryPath: defaults.providers.claudeAgent.binaryPath,
+                              binaryPath: DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath,
                             },
                             codex: {
                               ...settings.providers.codex,
-                              binaryPath: defaults.providers.codex.binaryPath,
-                              homePath: defaults.providers.codex.homePath,
+                              binaryPath: DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath,
+                              homePath: DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath,
                             },
                           },
                         });
@@ -876,10 +892,11 @@ function SettingsRouteView() {
                       const isDirty =
                         providerSettings.provider === "codex"
                           ? settings.providers.codex.binaryPath !==
-                              defaults.providers.codex.binaryPath ||
-                            settings.providers.codex.homePath !== defaults.providers.codex.homePath
+                              DEFAULT_UNIFIED_SETTINGS.providers.codex.binaryPath ||
+                            settings.providers.codex.homePath !==
+                              DEFAULT_UNIFIED_SETTINGS.providers.codex.homePath
                           : settings.providers.claudeAgent.binaryPath !==
-                            defaults.providers.claudeAgent.binaryPath;
+                            DEFAULT_UNIFIED_SETTINGS.providers.claudeAgent.binaryPath;
                       const binaryPathValue =
                         providerSettings.provider === "claudeAgent"
                           ? settings.providers.claudeAgent.binaryPath

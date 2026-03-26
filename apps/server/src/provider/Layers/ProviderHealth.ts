@@ -23,6 +23,7 @@ import {
   parseCodexCliVersion,
 } from "../codexCliVersion";
 import { ProviderHealth, type ProviderHealthShape } from "../Services/ProviderHealth";
+import { ServerSettingsService } from "../../serverSettings";
 
 const DEFAULT_TIMEOUT_MS = 4_000;
 const CODEX_PROVIDER = "codex" as const;
@@ -188,7 +189,15 @@ const OPENAI_AUTH_PROVIDERS = new Set(["openai"]);
 export const readCodexConfigModelProvider = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const codexHome = process.env.CODEX_HOME || path.join(OS.homedir(), ".codex");
+  const settingsService = yield* ServerSettingsService;
+  const codexHome = yield* settingsService.getSettings.pipe(
+    Effect.map(
+      (settings) =>
+        settings.providers.codex.homePath ||
+        process.env.CODEX_HOME ||
+        path.join(OS.homedir(), ".codex"),
+    ),
+  );
   const configPath = path.join(codexHome, "config.toml");
 
   const content = yield* fileSystem
@@ -225,9 +234,10 @@ export const readCodexConfigModelProvider = Effect.gen(function* () {
  * required because authentication is handled through provider-specific
  * environment variables.
  */
-export const hasCustomModelProvider = Effect.map(
-  readCodexConfigModelProvider,
-  (provider) => provider !== undefined && !OPENAI_AUTH_PROVIDERS.has(provider),
+
+export const hasCustomModelProvider = readCodexConfigModelProvider.pipe(
+  Effect.map((provider) => provider !== undefined && !OPENAI_AUTH_PROVIDERS.has(provider)),
+  Effect.orElseSucceed(() => false),
 );
 
 // ── Effect-native command execution ─────────────────────────────────
@@ -242,8 +252,13 @@ const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.
 const runCodexCommand = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const command = ChildProcess.make("codex", [...args], {
+    const settingsService = yield* ServerSettingsService;
+    const codexSettings = yield* settingsService.getSettings.pipe(
+      Effect.map((settings) => settings.providers.codex),
+    );
+    const command = ChildProcess.make(codexSettings.binaryPath || "codex", [...args], {
       shell: process.platform === "win32",
+      env: codexSettings.homePath ? { CODEX_HOME: codexSettings.homePath } : {},
     });
 
     const child = yield* spawner.spawn(command);
@@ -263,7 +278,11 @@ const runCodexCommand = (args: ReadonlyArray<string>) =>
 const runClaudeCommand = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const command = ChildProcess.make("claude", [...args], {
+    const settingsService = yield* ServerSettingsService;
+    const claudeSettings = yield* settingsService.getSettings.pipe(
+      Effect.map((settings) => settings.providers.claudeAgent),
+    );
+    const command = ChildProcess.make(claudeSettings.binaryPath || "claude", [...args], {
       shell: process.platform === "win32",
     });
 
@@ -286,7 +305,10 @@ const runClaudeCommand = (args: ReadonlyArray<string>) =>
 export const checkCodexProviderStatus: Effect.Effect<
   ServerProviderStatus,
   never,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
+  | ServerSettingsService
 > = Effect.gen(function* () {
   const checkedAt = new Date().toISOString();
 
@@ -494,7 +516,7 @@ export function parseClaudeAuthStatusFromOutput(result: CommandResult): {
 export const checkClaudeProviderStatus: Effect.Effect<
   ServerProviderStatus,
   never,
-  ChildProcessSpawner.ChildProcessSpawner
+  ChildProcessSpawner.ChildProcessSpawner | ServerSettingsService
 > = Effect.gen(function* () {
   const checkedAt = new Date().toISOString();
 

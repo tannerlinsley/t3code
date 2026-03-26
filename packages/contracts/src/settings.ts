@@ -79,6 +79,10 @@ export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerS
 // ── Unified type ─────────────────────────────────────────────────────
 
 export type UnifiedSettings = ServerSettings & ClientSettings;
+export const DEFAULT_UNIFIED_SETTINGS: UnifiedSettings = {
+  ...DEFAULT_SERVER_SETTINGS,
+  ...DEFAULT_CLIENT_SETTINGS,
+};
 
 // ── Server Settings Patch (replace with a Schema.deepPartial if available) ──────────────────────────────────────────
 

@@ -23,6 +23,7 @@ import {
   type ClientSettings,
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_UNIFIED_SETTINGS,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -129,16 +130,12 @@ export function useUpdateSettings() {
   );
 
   const resetSettings = useCallback(() => {
-    updateSettings({
-      ...DEFAULT_SERVER_SETTINGS,
-      ...DEFAULT_CLIENT_SETTINGS,
-    });
+    updateSettings(DEFAULT_UNIFIED_SETTINGS);
   }, [updateSettings]);
 
   return {
     updateSettings,
     resetSettings,
-    defaults: { ...DEFAULT_SERVER_SETTINGS, ...DEFAULT_CLIENT_SETTINGS } as UnifiedSettings,
   };
 }
 
