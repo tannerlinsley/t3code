@@ -26,6 +26,11 @@ interface ThreadTerminalState {
   activeTerminalGroupId: string;
 }
 
+export interface ThreadTerminalLaunchContext {
+  cwd: string;
+  worktreePath: string | null;
+}
+
 const TERMINAL_STATE_STORAGE_KEY = "t3code:terminal-state:v1";
 
 function createTerminalStateStorage() {
@@ -473,12 +478,20 @@ function updateTerminalStateByThreadId(
 
 interface TerminalStateStoreState {
   terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>;
+  terminalLaunchContextByThreadId: Record<ThreadId, ThreadTerminalLaunchContext>;
   setTerminalOpen: (threadId: ThreadId, open: boolean) => void;
   setTerminalHeight: (threadId: ThreadId, height: number) => void;
   splitTerminal: (threadId: ThreadId, terminalId: string) => void;
   newTerminal: (threadId: ThreadId, terminalId: string) => void;
+  ensureTerminal: (
+    threadId: ThreadId,
+    terminalId: string,
+    options?: { open?: boolean; active?: boolean },
+  ) => void;
   setActiveTerminal: (threadId: ThreadId, terminalId: string) => void;
   closeTerminal: (threadId: ThreadId, terminalId: string) => void;
+  setTerminalLaunchContext: (threadId: ThreadId, context: ThreadTerminalLaunchContext) => void;
+  clearTerminalLaunchContext: (threadId: ThreadId) => void;
   setTerminalActivity: (
     threadId: ThreadId,
     terminalId: string,
@@ -512,6 +525,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
 
       return {
         terminalStateByThreadId: {},
+        terminalLaunchContextByThreadId: {},
         setTerminalOpen: (threadId, open) =>
           updateTerminal(threadId, (state) => setThreadTerminalOpen(state, open)),
         setTerminalHeight: (threadId, height) =>
@@ -520,27 +534,92 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
           updateTerminal(threadId, (state) => splitThreadTerminal(state, terminalId)),
         newTerminal: (threadId, terminalId) =>
           updateTerminal(threadId, (state) => newThreadTerminal(state, terminalId)),
+        ensureTerminal: (threadId, terminalId, options) =>
+          updateTerminal(threadId, (state) => {
+            let nextState = state;
+            if (!state.terminalIds.includes(terminalId)) {
+              nextState = newThreadTerminal(nextState, terminalId);
+            }
+            if (options?.active === false) {
+              nextState = {
+                ...nextState,
+                activeTerminalId: state.activeTerminalId,
+                activeTerminalGroupId: state.activeTerminalGroupId,
+              };
+            }
+            if (options?.active ?? true) {
+              nextState = setThreadActiveTerminal(nextState, terminalId);
+            }
+            if (options?.open) {
+              nextState = setThreadTerminalOpen(nextState, true);
+            }
+            return normalizeThreadTerminalState(nextState);
+          }),
         setActiveTerminal: (threadId, terminalId) =>
           updateTerminal(threadId, (state) => setThreadActiveTerminal(state, terminalId)),
         closeTerminal: (threadId, terminalId) =>
           updateTerminal(threadId, (state) => closeThreadTerminal(state, terminalId)),
+        setTerminalLaunchContext: (threadId, context) =>
+          set((state) => ({
+            terminalLaunchContextByThreadId: {
+              ...state.terminalLaunchContextByThreadId,
+              [threadId]: context,
+            },
+          })),
+        clearTerminalLaunchContext: (threadId) =>
+          set((state) => {
+            if (!state.terminalLaunchContextByThreadId[threadId]) {
+              return state;
+            }
+            const { [threadId]: _removed, ...rest } = state.terminalLaunchContextByThreadId;
+            return { terminalLaunchContextByThreadId: rest };
+          }),
         setTerminalActivity: (threadId, terminalId, hasRunningSubprocess) =>
           updateTerminal(threadId, (state) =>
             setThreadTerminalActivity(state, terminalId, hasRunningSubprocess),
           ),
         clearTerminalState: (threadId) =>
-          updateTerminal(threadId, () => createDefaultThreadTerminalState()),
+          set((state) => {
+            const nextTerminalStateByThreadId = updateTerminalStateByThreadId(
+              state.terminalStateByThreadId,
+              threadId,
+              () => createDefaultThreadTerminalState(),
+            );
+            const hadLaunchContext = state.terminalLaunchContextByThreadId[threadId] !== undefined;
+            const { [threadId]: _removed, ...remainingLaunchContexts } =
+              state.terminalLaunchContextByThreadId;
+            if (
+              nextTerminalStateByThreadId === state.terminalStateByThreadId &&
+              !hadLaunchContext
+            ) {
+              return state;
+            }
+            return {
+              terminalStateByThreadId: nextTerminalStateByThreadId,
+              terminalLaunchContextByThreadId: remainingLaunchContexts,
+            };
+          }),
         removeOrphanedTerminalStates: (activeThreadIds) =>
           set((state) => {
             const orphanedIds = Object.keys(state.terminalStateByThreadId).filter(
               (id) => !activeThreadIds.has(id as ThreadId),
             );
-            if (orphanedIds.length === 0) return state;
+            const orphanedLaunchContextIds = Object.keys(
+              state.terminalLaunchContextByThreadId,
+            ).filter((id) => !activeThreadIds.has(id as ThreadId));
+            if (orphanedIds.length === 0 && orphanedLaunchContextIds.length === 0) return state;
             const next = { ...state.terminalStateByThreadId };
             for (const id of orphanedIds) {
               delete next[id as ThreadId];
             }
-            return { terminalStateByThreadId: next };
+            const nextLaunchContexts = { ...state.terminalLaunchContextByThreadId };
+            for (const id of orphanedLaunchContextIds) {
+              delete nextLaunchContexts[id as ThreadId];
+            }
+            return {
+              terminalStateByThreadId: next,
+              terminalLaunchContextByThreadId: nextLaunchContexts,
+            };
           }),
       };
     },

@@ -24,6 +24,7 @@ import {
 import { GitCore } from "../Services/GitCore.ts";
 import { GitHubCli } from "../Services/GitHubCli.ts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
+import { ProjectSetupScriptRunner } from "../../projectScripts/Services/ProjectSetupScriptRunner.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { GitManagerServiceError } from "../Errors.ts";
 
@@ -365,6 +366,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const gitCore = yield* GitCore;
   const gitHubCli = yield* GitHubCli;
   const textGeneration = yield* TextGeneration;
+  const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
   const serverSettingsService = yield* ServerSettingsService;
 
   const createProgressEmitter = (
@@ -993,6 +995,25 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
   const preparePullRequestThread: GitManagerShape["preparePullRequestThread"] = Effect.fn(
     "preparePullRequestThread",
   )(function* (input) {
+    const maybeRunSetupScript = (worktreePath: string) => {
+      if (!input.threadId) {
+        return Effect.void;
+      }
+      return projectSetupScriptRunner
+        .runForThread({
+          threadId: input.threadId,
+          projectCwd: input.cwd,
+          worktreePath,
+        })
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              `GitManager.preparePullRequestThread: failed to launch worktree setup script for thread ${input.threadId} in ${worktreePath}: ${error.message}`,
+            ).pipe(Effect.asVoid),
+          ),
+        );
+    };
+
     const normalizedReference = normalizePullRequestReference(input.reference);
     const rootWorktreePath = canonicalizeExistingPath(input.cwd);
     const pullRequestSummary = yield* gitHubCli.getPullRequest({
@@ -1124,6 +1145,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       path: null,
     });
     yield* ensureExistingWorktreeUpstream(worktree.worktree.path);
+    yield* maybeRunSetupScript(worktree.worktree.path);
 
     return {
       pullRequest,

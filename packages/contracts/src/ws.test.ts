@@ -67,9 +67,13 @@ it.effect("accepts git.preparePullRequestThread requests", () =>
         cwd: "/repo",
         reference: "#42",
         mode: "worktree",
+        threadId: "thread-1",
       },
     });
     assert.strictEqual(parsed.body._tag, WS_METHODS.gitPreparePullRequestThread);
+    if (parsed.body._tag === WS_METHODS.gitPreparePullRequestThread) {
+      assert.strictEqual(parsed.body.threadId, "thread-1");
+    }
   }),
 );
 

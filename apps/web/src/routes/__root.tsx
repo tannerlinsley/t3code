@@ -140,6 +140,8 @@ function EventRouter() {
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
+  const ensureTerminal = useTerminalStateStore((store) => store.ensureTerminal);
+  const setTerminalLaunchContext = useTerminalStateStore((store) => store.setTerminalLaunchContext);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -221,6 +223,14 @@ function EventRouter() {
       domainEventFlushThrottler.maybeExecute();
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
+      if (event.type === "started" || event.type === "restarted") {
+        const threadId = ThreadId.makeUnsafe(event.threadId);
+        ensureTerminal(threadId, event.terminalId, { open: true, active: true });
+        setTerminalLaunchContext(threadId, {
+          cwd: event.snapshot.cwd,
+          worktreePath: event.terminalId.startsWith("setup-") ? event.snapshot.cwd : null,
+        });
+      }
       const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);
       if (hasRunningSubprocess === null) {
         return;
@@ -327,10 +337,12 @@ function EventRouter() {
       unsubProvidersUpdated();
     };
   }, [
+    ensureTerminal,
     navigate,
     queryClient,
     removeOrphanedTerminalStates,
     setProjectExpanded,
+    setTerminalLaunchContext,
     syncServerReadModel,
   ]);
 

@@ -4,6 +4,11 @@ import {
   type KeybindingCommand,
   type ProjectScript,
 } from "@t3tools/contracts";
+import {
+  projectScriptCwd as sharedProjectScriptCwd,
+  projectScriptRuntimeEnv as sharedProjectScriptRuntimeEnv,
+  setupProjectScript as sharedSetupProjectScript,
+} from "@t3tools/shared/projectScripts";
 import { Schema } from "effect";
 
 function normalizeScriptId(value: string): string {
@@ -69,22 +74,13 @@ export function projectScriptCwd(input: {
   };
   worktreePath?: string | null;
 }): string {
-  return input.worktreePath ?? input.project.cwd;
+  return sharedProjectScriptCwd(input);
 }
 
 export function projectScriptRuntimeEnv(
   input: ProjectScriptRuntimeEnvInput,
 ): Record<string, string> {
-  const env: Record<string, string> = {
-    T3CODE_PROJECT_ROOT: input.project.cwd,
-  };
-  if (input.worktreePath) {
-    env.T3CODE_WORKTREE_PATH = input.worktreePath;
-  }
-  if (input.extraEnv) {
-    return { ...env, ...input.extraEnv };
-  }
-  return env;
+  return sharedProjectScriptRuntimeEnv(input);
 }
 
 export function primaryProjectScript(scripts: ProjectScript[]): ProjectScript | null {
@@ -93,5 +89,5 @@ export function primaryProjectScript(scripts: ProjectScript[]): ProjectScript | 
 }
 
 export function setupProjectScript(scripts: ProjectScript[]): ProjectScript | null {
-  return scripts.find((script) => script.runOnWorktreeCreate) ?? null;
+  return sharedSetupProjectScript(scripts);
 }

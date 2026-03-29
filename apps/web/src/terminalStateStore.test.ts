@@ -8,7 +8,10 @@ const THREAD_ID = ThreadId.makeUnsafe("thread-1");
 describe("terminalStateStore actions", () => {
   beforeEach(() => {
     useTerminalStateStore.persist.clearStorage();
-    useTerminalStateStore.setState({ terminalStateByThreadId: {} });
+    useTerminalStateStore.setState({
+      terminalStateByThreadId: {},
+      terminalLaunchContextByThreadId: {},
+    });
   });
 
   it("returns a closed default terminal state for unknown threads", () => {
@@ -79,6 +82,23 @@ describe("terminalStateStore actions", () => {
     expect(terminalState.terminalGroups).toEqual([
       { id: "group-default", terminalIds: ["default"] },
       { id: "group-terminal-2", terminalIds: ["terminal-2"] },
+    ]);
+  });
+
+  it("ensures unknown server terminals are registered, opened, and activated", () => {
+    const store = useTerminalStateStore.getState();
+    store.ensureTerminal(THREAD_ID, "setup-setup", { open: true, active: true });
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.terminalOpen).toBe(true);
+    expect(terminalState.terminalIds).toEqual(["default", "setup-setup"]);
+    expect(terminalState.activeTerminalId).toBe("setup-setup");
+    expect(terminalState.terminalGroups).toEqual([
+      { id: "group-default", terminalIds: ["default"] },
+      { id: "group-setup-setup", terminalIds: ["setup-setup"] },
     ]);
   });
 

@@ -1370,7 +1370,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("runs setup scripts after preparing a pull request worktree thread", async () => {
+  it("lets the server own setup after preparing a pull request worktree thread", async () => {
     useComposerDraftStore.setState({
       draftThreadsByThreadId: {
         [THREAD_ID]: {
@@ -1475,50 +1475,24 @@ describe("ChatView timeline estimator parity (full app)", () => {
             cwd: "/repo/project",
             reference: "1359",
             mode: "worktree",
+            threadId: THREAD_ID,
           });
         },
         { timeout: 8_000, interval: 16 },
       );
 
-      await vi.waitFor(
-        () => {
-          const openRequest = wsRequests.find(
-            (request) =>
-              request._tag === WS_METHODS.terminalOpen && request.cwd === "/repo/worktrees/pr-1359",
-          );
-          expect(openRequest).toMatchObject({
-            _tag: WS_METHODS.terminalOpen,
-            threadId: expect.any(String),
-            cwd: "/repo/worktrees/pr-1359",
-            env: {
-              T3CODE_PROJECT_ROOT: "/repo/project",
-              T3CODE_WORKTREE_PATH: "/repo/worktrees/pr-1359",
-            },
-          });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
-      await vi.waitFor(
-        () => {
-          const writeRequest = wsRequests.find(
-            (request) =>
-              request._tag === WS_METHODS.terminalWrite && request.data === "bun install\r",
-          );
-          expect(writeRequest).toMatchObject({
-            _tag: WS_METHODS.terminalWrite,
-            threadId: expect.any(String),
-            data: "bun install\r",
-          });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      expect(
+        wsRequests.some(
+          (request) =>
+            request._tag === WS_METHODS.terminalWrite && request.data === "bun install\r",
+        ),
+      ).toBe(false);
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("keeps first-send worktree setup scripts on the worktree terminal for local drafts", async () => {
+  it("sends bootstrap turn-starts and waits for server setup on first-send worktree drafts", async () => {
     useTerminalStateStore.setState({
       terminalStateByThreadId: {},
     });
@@ -1539,8 +1513,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
       },
     });
 
-    const worktreeBranch = "t3code/abcd1234";
-    const worktreePath = "/repo/worktrees/t3code-abcd1234";
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: withProjectScripts(createDraftOnlySnapshot(), [
@@ -1553,14 +1525,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
       ]),
       resolveRpc: (body) => {
-        if (body._tag === WS_METHODS.gitCreateWorktree) {
-          return {
-            worktree: {
-              branch: worktreeBranch,
-              path: worktreePath,
-            },
-          };
-        }
         if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
           return {
             sequence: fixture.snapshot.snapshotSequence + 1,
@@ -1580,74 +1544,50 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          const createWorktreeRequest = wsRequests.find(
-            (request) => request._tag === WS_METHODS.gitCreateWorktree,
-          );
-          expect(createWorktreeRequest).toMatchObject({
-            _tag: WS_METHODS.gitCreateWorktree,
-            cwd: "/repo/project",
-            branch: "main",
-            newBranch: expect.stringMatching(/^t3code\/[0-9a-f]{8}$/),
+          const dispatchRequest = wsRequests.find(
+            (request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand,
+          ) as
+            | {
+                _tag: string;
+                command?: {
+                  type?: string;
+                  bootstrap?: {
+                    createThread?: { projectId?: string };
+                    prepareWorktree?: { projectCwd?: string; baseBranch?: string; branch?: string };
+                    runSetupScript?: boolean;
+                  };
+                };
+              }
+            | undefined;
+          expect(dispatchRequest?.command).toMatchObject({
+            type: "thread.turn.start",
+            bootstrap: {
+              createThread: {
+                projectId: PROJECT_ID,
+              },
+              prepareWorktree: {
+                projectCwd: "/repo/project",
+                baseBranch: "main",
+                branch: expect.stringMatching(/^t3code\/[0-9a-f]{8}$/),
+              },
+              runSetupScript: true,
+            },
           });
         },
         { timeout: 8_000, interval: 16 },
       );
 
-      await vi.waitFor(
-        () => {
-          expect(useComposerDraftStore.getState().draftThreadsByThreadId[THREAD_ID]).toMatchObject({
-            branch: worktreeBranch,
-            worktreePath,
-            envMode: "worktree",
-          });
-        },
-        { timeout: 8_000, interval: 16 },
+      expect(wsRequests.some((request) => request._tag === WS_METHODS.gitCreateWorktree)).toBe(
+        false,
       );
-
-      await vi.waitFor(
-        () => {
-          const openRequests = wsRequests.filter(
-            (request) => request._tag === WS_METHODS.terminalOpen && request.threadId === THREAD_ID,
-          );
-          expect(openRequests.length).toBeGreaterThan(0);
-          expect(openRequests.every((request) => request.cwd === worktreePath)).toBe(true);
-          expect(
-            openRequests.every(
-              (request) =>
-                request.env &&
-                typeof request.env === "object" &&
-                (request.env as Record<string, string>).T3CODE_WORKTREE_PATH === worktreePath,
-            ),
-          ).toBe(true);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
-
       expect(
         wsRequests.some(
           (request) =>
-            request._tag === WS_METHODS.terminalOpen &&
+            request._tag === WS_METHODS.terminalWrite &&
             request.threadId === THREAD_ID &&
-            request.cwd === "/repo/project",
+            request.data === "bun install\r",
         ),
       ).toBe(false);
-
-      await vi.waitFor(
-        () => {
-          const writeRequest = wsRequests.find(
-            (request) =>
-              request._tag === WS_METHODS.terminalWrite &&
-              request.threadId === THREAD_ID &&
-              request.data === "bun install\r",
-          );
-          expect(writeRequest).toMatchObject({
-            _tag: WS_METHODS.terminalWrite,
-            threadId: THREAD_ID,
-            data: "bun install\r",
-          });
-        },
-        { timeout: 8_000, interval: 16 },
-      );
     } finally {
       await mounted.cleanup();
     }

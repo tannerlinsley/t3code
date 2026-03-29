@@ -56,6 +56,10 @@ import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
+import {
+  ProjectSetupScriptRunner,
+  type ProjectSetupScriptRunnerShape,
+} from "./projectScripts/Services/ProjectSetupScriptRunner.ts";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -500,7 +504,8 @@ describe("WebSocket Server", () => {
       providerRegistry?: ProviderRegistryShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
-      gitCore?: Pick<GitCoreShape, "listBranches" | "initRepo" | "pullCurrentBranch">;
+      gitCore?: Partial<GitCoreShape>;
+      projectSetupScriptRunner?: ProjectSetupScriptRunnerShape;
       terminalManager?: TerminalManagerShape;
       serverSettings?: Partial<ServerSettings>;
     } = {},
@@ -539,6 +544,9 @@ describe("WebSocket Server", () => {
       options.gitManager ? Layer.succeed(GitManager, options.gitManager) : Layer.empty,
       options.gitCore
         ? Layer.succeed(GitCore, options.gitCore as unknown as GitCoreShape)
+        : Layer.empty,
+      options.projectSetupScriptRunner
+        ? Layer.succeed(ProjectSetupScriptRunner, options.projectSetupScriptRunner)
         : Layer.empty,
       options.terminalManager
         ? Layer.succeed(TerminalManager, options.terminalManager)
@@ -1379,6 +1387,159 @@ describe("WebSocket Server", () => {
     expect(domainEvent.type).toBe("thread.message-sent");
     expect(domainEvent.payload.messageId).toBe("assistant:item-1");
     expect(domainEvent.payload.text).toBe("hello from runtime");
+  });
+
+  it("bootstraps first-send worktree turns on the server before dispatching turn start", async () => {
+    const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
+    const providerService: ProviderServiceShape = {
+      startSession: (threadId) =>
+        Effect.succeed({
+          provider: "codex",
+          status: "ready",
+          runtimeMode: "full-access",
+          threadId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      sendTurn: ({ threadId }) =>
+        Effect.succeed({
+          threadId,
+          turnId: asTurnId("provider-turn-bootstrap"),
+        }),
+      interruptTurn: () => unsupported(),
+      respondToRequest: () => unsupported(),
+      respondToUserInput: () => unsupported(),
+      stopSession: () => unsupported(),
+      listSessions: () => Effect.succeed([]),
+      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      rollbackConversation: () => unsupported(),
+      streamEvents: Stream.empty,
+    };
+    const createWorktree = vi.fn(() =>
+      Effect.succeed({
+        worktree: {
+          branch: "t3code/bootstrap-branch",
+          path: "/tmp/bootstrap-worktree",
+        },
+      }),
+    );
+    const runForThread = vi.fn(() =>
+      Effect.succeed({
+        status: "started" as const,
+        scriptId: "setup",
+        scriptName: "Setup",
+        terminalId: "setup-setup",
+        cwd: "/tmp/bootstrap-worktree",
+      }),
+    );
+
+    server = await createTestServer({
+      cwd: "/test",
+      providerLayer: Layer.succeed(ProviderService, providerService),
+      gitCore: { createWorktree },
+      projectSetupScriptRunner: { runForThread },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const workspaceRoot = makeTempDir("t3code-ws-bootstrap-project-");
+    const createdAt = new Date().toISOString();
+    const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "project.create",
+      commandId: "cmd-bootstrap-project-create",
+      projectId: "project-bootstrap",
+      title: "Bootstrap Project",
+      workspaceRoot,
+      defaultModelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      createdAt,
+    });
+    expect(createProjectResponse.error).toBeUndefined();
+
+    const startTurnResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
+      type: "thread.turn.start",
+      commandId: "cmd-bootstrap-turn-start",
+      threadId: "thread-bootstrap",
+      message: {
+        messageId: "msg-bootstrap",
+        role: "user",
+        text: "hello",
+        attachments: [],
+      },
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      bootstrap: {
+        createThread: {
+          projectId: "project-bootstrap",
+          title: "Bootstrap Thread",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "main",
+          worktreePath: null,
+          createdAt,
+        },
+        prepareWorktree: {
+          projectCwd: workspaceRoot,
+          baseBranch: "main",
+          branch: "t3code/bootstrap-branch",
+        },
+        runSetupScript: true,
+      },
+      createdAt,
+    });
+    expect(startTurnResponse.error).toBeUndefined();
+    expect(createWorktree).toHaveBeenCalledWith({
+      cwd: workspaceRoot,
+      branch: "main",
+      newBranch: "t3code/bootstrap-branch",
+      path: null,
+    });
+    expect(runForThread).toHaveBeenCalledWith({
+      threadId: "thread-bootstrap",
+      projectId: "project-bootstrap",
+      projectCwd: workspaceRoot,
+      worktreePath: "/tmp/bootstrap-worktree",
+    });
+
+    const snapshotResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.getSnapshot);
+    expect(snapshotResponse.error).toBeUndefined();
+    const snapshot = snapshotResponse.result as { threads: unknown[] };
+    expect(snapshot.threads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "thread-bootstrap",
+          branch: "t3code/bootstrap-branch",
+          worktreePath: "/tmp/bootstrap-worktree",
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              id: "msg-bootstrap",
+              text: "hello",
+            }),
+          ]),
+          activities: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "setup-script.requested",
+            }),
+            expect.objectContaining({
+              kind: "setup-script.started",
+            }),
+          ]),
+        }),
+      ]),
+    );
   });
 
   it("routes terminal RPC methods and broadcasts terminal events", async () => {
