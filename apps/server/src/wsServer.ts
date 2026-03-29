@@ -50,7 +50,6 @@ import { GitManager } from "./git/Services/GitManager.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { Keybindings } from "./keybindings";
 import { ServerSettingsService } from "./serverSettings";
-import { searchWorkspaceEntries } from "./workspaceEntries";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
@@ -79,6 +78,7 @@ import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
+import { WorkspaceEntries } from "./project/Services/WorkspaceEntries.ts";
 
 /**
  * ServerShape - Service API for server lifecycle control.
@@ -218,6 +218,7 @@ export type ServerRuntimeServices =
   | TerminalManager
   | Keybindings
   | ServerSettingsService
+  | WorkspaceEntries
   | Open
   | AnalyticsService;
 
@@ -263,6 +264,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const serverSettingsManager = yield* ServerSettingsService;
   const providerRegistry = yield* ProviderRegistry;
   const git = yield* GitCore;
+  const workspaceEntries = yield* WorkspaceEntries;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -768,13 +770,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
 
       case WS_METHODS.projectsSearchEntries: {
         const body = stripRequestTag(request.body);
-        return yield* Effect.tryPromise({
-          try: () => searchWorkspaceEntries(body),
-          catch: (cause) =>
-            new RouteRequestError({
-              message: `Failed to search workspace entries: ${String(cause)}`,
-            }),
-        });
+        return yield* workspaceEntries.search(body).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RouteRequestError({
+                message: `Failed to search workspace entries: ${cause.detail}`,
+              }),
+          ),
+        );
       }
 
       case WS_METHODS.projectsWriteFile: {
@@ -802,6 +805,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
               }),
           ),
         );
+        yield* workspaceEntries.invalidate(body.cwd);
         return { relativePath: target.relativePath };
       }
 
