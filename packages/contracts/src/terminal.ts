@@ -26,13 +26,13 @@ const TerminalIdWithDefaultSchema = TerminalIdSchema.pipe(
 export const TerminalThreadInput = Schema.Struct({
   threadId: TrimmedNonEmptyStringSchema,
 });
-export type TerminalThreadInput = Schema.Codec.Encoded<typeof TerminalThreadInput>;
+export type TerminalThreadInput = typeof TerminalThreadInput.Type;
 
 const TerminalSessionInput = Schema.Struct({
   ...TerminalThreadInput.fields,
   terminalId: TerminalIdWithDefaultSchema,
 });
-export type TerminalSessionInput = Schema.Codec.Encoded<typeof TerminalSessionInput>;
+export type TerminalSessionInput = typeof TerminalSessionInput.Type;
 
 export const TerminalOpenInput = Schema.Struct({
   ...TerminalSessionInput.fields,
@@ -41,23 +41,23 @@ export const TerminalOpenInput = Schema.Struct({
   rows: Schema.optional(TerminalRowsSchema),
   env: Schema.optional(TerminalEnvSchema),
 });
-export type TerminalOpenInput = Schema.Codec.Encoded<typeof TerminalOpenInput>;
+export type TerminalOpenInput = typeof TerminalOpenInput.Type;
 
 export const TerminalWriteInput = Schema.Struct({
   ...TerminalSessionInput.fields,
   data: Schema.String.check(Schema.isNonEmpty()).check(Schema.isMaxLength(65_536)),
 });
-export type TerminalWriteInput = Schema.Codec.Encoded<typeof TerminalWriteInput>;
+export type TerminalWriteInput = typeof TerminalWriteInput.Type;
 
 export const TerminalResizeInput = Schema.Struct({
   ...TerminalSessionInput.fields,
   cols: TerminalColsSchema,
   rows: TerminalRowsSchema,
 });
-export type TerminalResizeInput = Schema.Codec.Encoded<typeof TerminalResizeInput>;
+export type TerminalResizeInput = typeof TerminalResizeInput.Type;
 
 export const TerminalClearInput = TerminalSessionInput;
-export type TerminalClearInput = Schema.Codec.Encoded<typeof TerminalClearInput>;
+export type TerminalClearInput = typeof TerminalClearInput.Type;
 
 export const TerminalRestartInput = Schema.Struct({
   ...TerminalSessionInput.fields,
@@ -66,14 +66,14 @@ export const TerminalRestartInput = Schema.Struct({
   rows: TerminalRowsSchema,
   env: Schema.optional(TerminalEnvSchema),
 });
-export type TerminalRestartInput = Schema.Codec.Encoded<typeof TerminalRestartInput>;
+export type TerminalRestartInput = typeof TerminalRestartInput.Type;
 
 export const TerminalCloseInput = Schema.Struct({
   ...TerminalThreadInput.fields,
   terminalId: Schema.optional(TerminalIdSchema),
   deleteHistory: Schema.optional(Schema.Boolean),
 });
-export type TerminalCloseInput = Schema.Codec.Encoded<typeof TerminalCloseInput>;
+export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;

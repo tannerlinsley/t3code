@@ -90,20 +90,19 @@ const defaultServerSettings = DEFAULT_SERVER_SETTINGS;
 
 class MockTerminalManager implements TerminalManagerShape {
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
-  private readonly listeners = new Set<(event: TerminalEvent) => void>();
+  private readonly eventPubSub = Effect.runSync(PubSub.unbounded<TerminalEvent>());
+  private activeSubscriptions = 0;
 
   private key(threadId: string, terminalId: string): string {
     return `${threadId}\u0000${terminalId}`;
   }
 
   emitEvent(event: TerminalEvent): void {
-    for (const listener of this.listeners) {
-      listener(event);
-    }
+    Effect.runSync(PubSub.publish(this.eventPubSub, event));
   }
 
   subscriptionCount(): number {
-    return this.listeners.size;
+    return this.activeSubscriptions;
   }
 
   readonly open: TerminalManagerShape["open"] = (input: TerminalOpenInput) =>
@@ -208,15 +207,16 @@ class MockTerminalManager implements TerminalManagerShape {
       }
     });
 
-  readonly subscribe: TerminalManagerShape["subscribe"] = (listener) =>
-    Effect.sync(() => {
-      this.listeners.add(listener);
-      return () => {
-        this.listeners.delete(listener);
-      };
-    });
-
-  readonly dispose: TerminalManagerShape["dispose"] = Effect.void;
+  get streamEvents(): TerminalManagerShape["streamEvents"] {
+    this.activeSubscriptions += 1;
+    return Stream.fromPubSub(this.eventPubSub).pipe(
+      Stream.ensuring(
+        Effect.sync(() => {
+          this.activeSubscriptions -= 1;
+        }),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1454,19 +1454,25 @@ describe("WebSocket Server", () => {
     expect(push.channel).toBe(WS_CHANNELS.terminalEvent);
   });
 
-  it("detaches terminal event listener on stop for injected manager", async () => {
+  it("shuts down cleanly for injected terminal managers", async () => {
     const terminalManager = new MockTerminalManager();
     server = await createTestServer({
       cwd: "/test",
       terminalManager,
     });
 
-    expect(terminalManager.subscriptionCount()).toBe(1);
-
     await closeTestServer();
     server = null;
 
-    expect(terminalManager.subscriptionCount()).toBe(0);
+    expect(() =>
+      terminalManager.emitEvent({
+        type: "output",
+        threadId: "thread-1",
+        terminalId: DEFAULT_TERMINAL_ID,
+        createdAt: new Date().toISOString(),
+        data: "after shutdown\n",
+      }),
+    ).not.toThrow();
   });
 
   it("returns validation errors for invalid terminal open params", async () => {
