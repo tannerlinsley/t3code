@@ -153,9 +153,27 @@ type ThreadPr = GitStatusResult["pr"];
 
 function ThreadStatusLabel({
   status,
+  compact = false,
 }: {
   status: NonNullable<ReturnType<typeof resolveThreadStatusPill>>;
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <span
+        title={status.label}
+        className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
+      >
+        <span
+          className={`size-[9px] rounded-full ${status.dotClass} ${
+            status.pulse ? "animate-pulse" : ""
+          }`}
+        />
+        <span className="sr-only">{status.label}</span>
+      </span>
+    );
+  }
+
   return (
     <span
       title={status.label}
@@ -1567,9 +1585,9 @@ export default function Sidebar() {
                   expandThreadListForProject(project.id);
                 }}
               >
-                <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                <span className="flex min-w-0 flex-1 items-center gap-2">
+                  {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} compact />}
                   <span>Show more</span>
-                  {hiddenThreadStatus && <ThreadStatusLabel status={hiddenThreadStatus} />}
                 </span>
               </SidebarMenuSubButton>
             </SidebarMenuSubItem>
