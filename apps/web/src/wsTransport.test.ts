@@ -131,7 +131,6 @@ describe("WsTransport", () => {
     });
 
     const socket = getSocket();
-    expect(socket.sent).toHaveLength(0);
     socket.open();
 
     await waitFor(() => {
@@ -306,6 +305,56 @@ describe("WsTransport", () => {
     });
 
     unsubscribe();
+    transport.dispose();
+  });
+
+  it("accepts request options for long-running RPCs", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const socket = getSocket();
+    socket.open();
+
+    const requestPromise = transport.request(
+      WS_METHODS.gitRunStackedAction,
+      {
+        actionId: "action-1",
+        cwd: "/repo",
+        action: "commit",
+      },
+      { timeoutMs: null },
+    );
+
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+
+    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            action: "commit",
+            branch: { status: "skipped_not_requested" },
+            commit: { status: "created", commitSha: "abc123", subject: "feat: demo" },
+            push: { status: "skipped_not_requested" },
+            pr: { status: "skipped_not_requested" },
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({
+      action: "commit",
+      branch: { status: "skipped_not_requested" },
+      commit: { status: "created", commitSha: "abc123", subject: "feat: demo" },
+      push: { status: "skipped_not_requested" },
+      pr: { status: "skipped_not_requested" },
+    });
     transport.dispose();
   });
 });

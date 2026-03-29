@@ -20,7 +20,7 @@ import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
 import * as Client from "effect/unstable/sql/SqlClient";
 import type { Connection } from "effect/unstable/sql/SqlConnection";
-import { classifySqliteError, SqlError } from "effect/unstable/sql/SqlError";
+import { SqlError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
 
 const ATTR_DB_SYSTEM_NAME = "db.system.name";
@@ -28,6 +28,8 @@ const ATTR_DB_SYSTEM_NAME = "db.system.name";
 export const TypeId: TypeId = "~local/sqlite-node/SqliteClient";
 
 export type TypeId = "~local/sqlite-node/SqliteClient";
+
+const toSqlError = (cause: unknown, message: string) => new SqlError({ cause, message });
 
 /**
  * SqliteClient - Effect service tag for the sqlite SQL client.
@@ -109,10 +111,7 @@ const makeWithDatabase = (
         lookup: (sql: string) =>
           Effect.try({
             try: () => db.prepare(sql),
-            catch: (cause) =>
-              new SqlError({
-                reason: classifySqliteError(cause, { message: "Failed to prepare statement" }),
-              }),
+            catch: (cause) => toSqlError(cause, "Failed to prepare statement"),
           }),
       });
 
@@ -130,11 +129,7 @@ const makeWithDatabase = (
             const result = statement.run(...(params as any));
             return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
           } catch (cause) {
-            return Effect.fail(
-              new SqlError({
-                reason: classifySqliteError(cause, { message: "Failed to execute statement" }),
-              }),
-            );
+            return Effect.fail(toSqlError(cause, "Failed to execute statement"));
           }
         });
 
@@ -157,10 +152,7 @@ const makeWithDatabase = (
                 statement.run(...(params as any));
                 return [];
               },
-              catch: (cause) =>
-                new SqlError({
-                  reason: classifySqliteError(cause, { message: "Failed to execute statement" }),
-                }),
+              catch: (cause) => toSqlError(cause, "Failed to execute statement"),
             }),
           (statement) =>
             Effect.sync(() => {

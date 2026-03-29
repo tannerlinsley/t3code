@@ -13,6 +13,10 @@ interface SubscribeOptions {
   readonly retryDelayMs?: number;
 }
 
+interface RequestOptions {
+  readonly timeoutMs?: number | null;
+}
+
 const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = 250;
 
 class WsTransportStreamMethodError extends Data.TaggedError("WsTransportStreamMethodError")<{
@@ -75,7 +79,11 @@ export class WsTransport {
     this.clientPromise = this.runtime.runPromise(Scope.provide(this.clientScope)(makeWsRpcClient));
   }
 
-  async request<T = unknown>(method: string, params?: unknown): Promise<T> {
+  async request<T = unknown>(
+    method: string,
+    params?: unknown,
+    _options?: RequestOptions,
+  ): Promise<T> {
     if (this.disposed) {
       throw new Error("Transport disposed");
     }

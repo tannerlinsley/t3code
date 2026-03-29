@@ -5,7 +5,6 @@ import { ServerConfig } from "./config";
 import { attachmentsRouteLayer, healthRouteLayer, staticAndDevRouteLayer } from "./http";
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
-import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { OpenLive } from "./open";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
@@ -26,7 +25,7 @@ import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
-import { CodexTextGenerationLive } from "./git/Layers/CodexTextGeneration";
+import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { KeybindingsLive } from "./keybindings";
@@ -37,6 +36,8 @@ import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus"
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
+import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
+import { ServerSettingsLive } from "./serverSettings";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -143,7 +144,7 @@ const GitLayerLive = Layer.empty.pipe(
     GitManagerLive.pipe(
       Layer.provideMerge(GitCoreLive),
       Layer.provideMerge(GitHubCliLive),
-      Layer.provideMerge(CodexTextGenerationLive),
+      Layer.provideMerge(RoutingTextGenerationLive),
     ),
   ),
   Layer.provideMerge(GitCoreLive),
@@ -163,11 +164,12 @@ const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
+  Layer.provideMerge(ProviderRegistryLive),
+  Layer.provideMerge(ServerSettingsLive),
 
   // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),
   Layer.provideMerge(OpenLive),
-  Layer.provideMerge(ProviderHealthLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
 );
 

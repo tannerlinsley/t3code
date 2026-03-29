@@ -2,7 +2,7 @@
  * DrainableWorker - A queue-based worker that exposes a `drain()` effect.
  *
  * Wraps the common `Queue.unbounded` + `Effect.forever` pattern and adds
- * a signal that resolves when the queue is empty **and** the current item
+ * a signal that resolves when the queue is empty and the current item
  * has finished processing. This lets tests replace timing-sensitive
  * `Effect.sleep` calls with deterministic `drain()`.
  *

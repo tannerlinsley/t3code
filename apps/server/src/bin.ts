@@ -9,6 +9,6 @@ import { cli } from "./cli";
 import { version } from "../package.json" with { type: "json" };
 
 Command.run(cli, { version }).pipe(
-  Effect.provide(Layer.mergeAll(NetService.layer, NodeServices.layer)),
+  Effect.provide(Layer.merge(NodeServices.layer, NetService.layer)),
   NodeRuntime.runMain,
 );

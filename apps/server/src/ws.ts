@@ -1,5 +1,6 @@
-import { Effect, FileSystem, Layer, Option, Path, Schema, Stream, PubSub, Ref } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, PubSub, Ref, Schema, Stream } from "effect";
 import {
+  type GitActionProgressEvent,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
@@ -9,6 +10,7 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
+  ServerSettingsError as ServerSettingsRpcError,
   type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
@@ -26,9 +28,13 @@ import { Open, resolveAvailableEditors } from "./open";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
-import { ProviderHealth } from "./provider/Services/ProviderHealth";
+import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
+import {
+  ServerSettingsError as ServerSettingsServiceError,
+  ServerSettingsService,
+} from "./serverSettings";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { resolveWorkspaceWritePath, searchWorkspaceEntries } from "./workspaceEntries";
 
@@ -44,10 +50,40 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const gitManager = yield* GitManager;
     const git = yield* GitCore;
     const terminalManager = yield* TerminalManager;
-    const providerHealth = yield* ProviderHealth;
+    const providerRegistry = yield* ProviderRegistry;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
+    const serverSettings = yield* ServerSettingsService;
     const startup = yield* ServerRuntimeStartup;
+    const gitActionProgressPubSub = yield* Effect.acquireRelease(
+      PubSub.unbounded<GitActionProgressEvent>(),
+      PubSub.shutdown,
+    );
+
+    const mapServerSettingsError = (cause: ServerSettingsServiceError) =>
+      new ServerSettingsRpcError({
+        settingsPath: cause.settingsPath,
+        detail: cause.detail,
+        ...(cause.cause ? { cause: cause.cause } : {}),
+      });
+
+    const loadServerConfig = Effect.gen(function* () {
+      const keybindingsConfig = yield* keybindings.loadConfigState;
+      const providers = yield* providerRegistry.getProviders;
+      const settings = yield* serverSettings.getSettings.pipe(
+        Effect.mapError(mapServerSettingsError),
+      );
+
+      return {
+        cwd: config.cwd,
+        keybindingsConfigPath: config.keybindingsConfigPath,
+        keybindings: keybindingsConfig.keybindings,
+        issues: keybindingsConfig.issues,
+        providers,
+        availableEditors: resolveAvailableEditors(),
+        settings,
+      };
+    });
 
     return WsRpcGroup.of({
       [ORCHESTRATION_WS_METHODS.getSnapshot]: (_input) =>
@@ -166,11 +202,18 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             );
           }),
         ),
+      [WS_METHODS.serverGetConfig]: (_input) => loadServerConfig,
+      [WS_METHODS.serverRefreshProviders]: (_input) =>
+        providerRegistry.refresh().pipe(Effect.map((providers) => ({ providers }))),
       [WS_METHODS.serverUpsertKeybinding]: (rule) =>
         Effect.gen(function* () {
           const keybindingsConfig = yield* keybindings.upsertKeybindingRule(rule);
           return { keybindings: keybindingsConfig, issues: [] };
         }),
+      [WS_METHODS.serverGetSettings]: (_input) =>
+        serverSettings.getSettings.pipe(Effect.mapError(mapServerSettingsError)),
+      [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
+        serverSettings.updateSettings(patch).pipe(Effect.mapError(mapServerSettingsError)),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         Effect.tryPromise({
           try: () => searchWorkspaceEntries(input),
@@ -211,7 +254,13 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.shellOpenInEditor]: (input) => open.openInEditor(input),
       [WS_METHODS.gitStatus]: (input) => gitManager.status(input),
       [WS_METHODS.gitPull]: (input) => git.pullCurrentBranch(input.cwd),
-      [WS_METHODS.gitRunStackedAction]: (input) => gitManager.runStackedAction(input),
+      [WS_METHODS.gitRunStackedAction]: (input) =>
+        gitManager.runStackedAction(input, {
+          actionId: input.actionId,
+          progressReporter: {
+            publish: (event) => PubSub.publish(gitActionProgressPubSub, event).pipe(Effect.asVoid),
+          },
+        }),
       [WS_METHODS.gitResolvePullRequest]: (input) => gitManager.resolvePullRequest(input),
       [WS_METHODS.gitPreparePullRequestThread]: (input) =>
         gitManager.preparePullRequestThread(input),
@@ -239,49 +288,42 @@ const WsRpcLayer = WsRpcGroup.toLayer(
             );
           }),
         ),
+      [WS_METHODS.subscribeGitActionProgress]: (_input) =>
+        Stream.fromPubSub(gitActionProgressPubSub),
       [WS_METHODS.subscribeServerConfig]: (_input) =>
         Stream.unwrap(
           Effect.gen(function* () {
-            const keybindingsConfig = yield* keybindings.loadConfigState;
-            const providers = yield* providerHealth.getStatuses;
-
             const keybindingsUpdates = keybindings.streamChanges.pipe(
-              Stream.mapEffect((event) =>
-                Effect.succeed({
-                  version: 1 as const,
-                  type: "keybindingsUpdated" as const,
-                  payload: {
-                    issues: event.issues,
-                  },
-                }),
-              ),
+              Stream.map((event) => ({
+                version: 1 as const,
+                type: "keybindingsUpdated" as const,
+                payload: {
+                  issues: event.issues,
+                },
+              })),
             );
-            const providerStatuses = Stream.tick("10 seconds").pipe(
-              Stream.mapEffect(() =>
-                Effect.gen(function* () {
-                  const providers = yield* providerHealth.getStatuses;
-                  return {
-                    version: 1 as const,
-                    type: "providerStatuses" as const,
-                    payload: { providers },
-                  };
-                }),
-              ),
+            const providerStatuses = providerRegistry.streamChanges.pipe(
+              Stream.map((providers) => ({
+                version: 1 as const,
+                type: "providerStatuses" as const,
+                payload: { providers },
+              })),
             );
+            const settingsUpdates = serverSettings.streamChanges.pipe(
+              Stream.map((settings) => ({
+                version: 1 as const,
+                type: "settingsUpdated" as const,
+                payload: { settings },
+              })),
+            );
+
             return Stream.concat(
               Stream.make({
                 version: 1 as const,
                 type: "snapshot" as const,
-                config: {
-                  cwd: config.cwd,
-                  keybindingsConfigPath: config.keybindingsConfigPath,
-                  keybindings: keybindingsConfig.keybindings,
-                  issues: keybindingsConfig.issues,
-                  providers,
-                  availableEditors: resolveAvailableEditors(),
-                },
+                config: yield* loadServerConfig,
               }),
-              Stream.merge(keybindingsUpdates, providerStatuses),
+              Stream.merge(keybindingsUpdates, Stream.merge(providerStatuses, settingsUpdates)),
             );
           }),
         ),

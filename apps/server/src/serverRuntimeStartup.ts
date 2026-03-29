@@ -1,6 +1,7 @@
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  type ModelSelection,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -13,6 +14,7 @@ import { OrchestrationEngineService } from "./orchestration/Services/Orchestrati
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
+import { ServerSettingsService } from "./serverSettings";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
 
 const isWildcardHost = (host: string | undefined): boolean =>
@@ -144,25 +146,31 @@ const autoBootstrapWelcome = Effect.gen(function* () {
         (project) => project.workspaceRoot === serverConfig.cwd && project.deletedAt === null,
       );
       let nextProjectId: ProjectId;
-      let nextProjectDefaultModel: string;
+      let nextProjectDefaultModelSelection: ModelSelection;
 
       if (!existingProject) {
         const createdAt = new Date().toISOString();
         nextProjectId = ProjectId.makeUnsafe(crypto.randomUUID());
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-        nextProjectDefaultModel = "gpt-5-codex";
+        nextProjectDefaultModelSelection = {
+          provider: "codex",
+          model: "gpt-5-codex",
+        };
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.makeUnsafe(crypto.randomUUID()),
           projectId: nextProjectId,
           title: bootstrapProjectTitle,
           workspaceRoot: serverConfig.cwd,
-          defaultModel: nextProjectDefaultModel,
+          defaultModelSelection: nextProjectDefaultModelSelection,
           createdAt,
         });
       } else {
         nextProjectId = existingProject.id;
-        nextProjectDefaultModel = existingProject.defaultModel ?? "gpt-5-codex";
+        nextProjectDefaultModelSelection = existingProject.defaultModelSelection ?? {
+          provider: "codex",
+          model: "gpt-5-codex",
+        };
       }
 
       const existingThread = snapshot.threads.find(
@@ -177,7 +185,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
           threadId: createdThreadId,
           projectId: nextProjectId,
           title: "New thread",
-          model: nextProjectDefaultModel,
+          modelSelection: nextProjectDefaultModelSelection,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "full-access",
           branch: null,
@@ -230,6 +238,7 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
   const keybindings = yield* Keybindings;
   const orchestrationReactor = yield* OrchestrationReactor;
   const lifecycleEvents = yield* ServerLifecycleEvents;
+  const serverSettings = yield* ServerSettingsService;
 
   const commandGate = yield* makeCommandGate;
   const httpListening = yield* Deferred.make<void>();
@@ -243,6 +252,18 @@ const makeServerRuntimeStartup = Effect.gen(function* () {
       Effect.catch((error) =>
         Effect.logWarning("failed to start keybindings runtime", {
           path: error.configPath,
+          detail: error.detail,
+          cause: error.cause,
+        }),
+      ),
+      Effect.forkScoped,
+    );
+
+    yield* Effect.logDebug("startup phase: starting server settings runtime");
+    yield* serverSettings.start.pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("failed to start server settings runtime", {
+          path: error.settingsPath,
           detail: error.detail,
           cause: error.cause,
         }),

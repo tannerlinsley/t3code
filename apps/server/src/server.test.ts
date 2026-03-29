@@ -3,6 +3,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  DEFAULT_SERVER_SETTINGS,
   GitCommandError,
   KeybindingRule,
   OpenError,
@@ -18,8 +19,7 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
-import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Stream } from "effect";
-import { TestClock } from "effect/testing";
+import { Effect, FileSystem, Layer, Path, Stream } from "effect";
 import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
@@ -44,13 +44,21 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
-import { ProviderHealth, type ProviderHealthShape } from "./provider/Services/ProviderHealth.ts";
+import {
+  ProviderRegistry,
+  type ProviderRegistryShape,
+} from "./provider/Services/ProviderRegistry.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
+import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 
 const defaultProjectId = ProjectId.makeUnsafe("project-default");
 const defaultThreadId = ThreadId.makeUnsafe("thread-default");
+const defaultModelSelection = {
+  provider: "codex",
+  model: "gpt-5-codex",
+} as const;
 
 const makeDefaultOrchestrationReadModel = () => {
   const now = new Date().toISOString();
@@ -62,7 +70,7 @@ const makeDefaultOrchestrationReadModel = () => {
         id: defaultProjectId,
         title: "Default Project",
         workspaceRoot: "/tmp/default-project",
-        defaultModel: "gpt-5-codex",
+        defaultModelSelection,
         scripts: [],
         createdAt: now,
         updatedAt: now,
@@ -74,13 +82,14 @@ const makeDefaultOrchestrationReadModel = () => {
         id: defaultThreadId,
         projectId: defaultProjectId,
         title: "Default Thread",
-        model: "gpt-5-codex",
+        modelSelection: defaultModelSelection,
         interactionMode: "default" as const,
         runtimeMode: "full-access" as const,
         branch: null,
         worktreePath: null,
         createdAt: now,
         updatedAt: now,
+        archivedAt: null,
         latestTurn: null,
         messages: [],
         session: null,
@@ -97,7 +106,8 @@ const buildAppUnderTest = (options?: {
   config?: Partial<ServerConfigShape>;
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
-    providerHealth?: Partial<ProviderHealthShape>;
+    providerRegistry?: Partial<ProviderRegistryShape>;
+    serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
     gitManager?: Partial<GitManagerShape>;
@@ -144,9 +154,21 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProviderHealth)({
-          getStatuses: Effect.succeed([]),
-          ...options?.layers?.providerHealth,
+        Layer.mock(ProviderRegistry)({
+          getProviders: Effect.succeed([]),
+          refresh: () => Effect.succeed([]),
+          streamChanges: Stream.empty,
+          ...options?.layers?.providerRegistry,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ServerSettingsService)({
+          start: Effect.void,
+          ready: Effect.void,
+          getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+          updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
+          streamChanges: Stream.empty,
+          ...options?.layers?.serverSettings,
         }),
       ),
       Layer.provide(
@@ -446,8 +468,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             }),
             streamChanges: Stream.succeed(changeEvent),
           },
-          providerHealth: {
-            getStatuses: Effect.succeed(providers),
+          providerRegistry: {
+            getProviders: Effect.succeed(providers),
           },
         },
       });
@@ -466,6 +488,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.deepEqual(first.config.keybindings, []);
         assert.deepEqual(first.config.issues, []);
         assert.deepEqual(first.config.providers, providers);
+        assert.deepEqual(first.config.settings, DEFAULT_SERVER_SETTINGS);
       }
       assert.deepEqual(second, {
         version: 1,
@@ -475,7 +498,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("routes websocket rpc subscribeServerConfig emits providerStatuses heartbeat", () =>
+  it.effect("routes websocket rpc subscribeServerConfig emits provider status updates", () =>
     Effect.gen(function* () {
       const providers = [] as const;
 
@@ -488,32 +511,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             }),
             streamChanges: Stream.empty,
           },
-          providerHealth: {
-            getStatuses: Effect.succeed(providers),
+          providerRegistry: {
+            getProviders: Effect.succeed([]),
+            streamChanges: Stream.succeed(providers),
           },
         },
       });
 
       const wsUrl = yield* getWsServerUrl("/ws");
       const events = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const snapshotReceived = yield* Deferred.make<void>();
-          const eventsFiber = yield* withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.subscribeServerConfig]({}).pipe(
-              Stream.tap((event) =>
-                event.type === "snapshot"
-                  ? Deferred.succeed(snapshotReceived, undefined).pipe(Effect.ignore)
-                  : Effect.void,
-              ),
-              Stream.take(2),
-              Stream.runCollect,
-            ),
-          ).pipe(Effect.forkScoped);
-
-          yield* Deferred.await(snapshotReceived);
-          yield* TestClock.adjust("10 seconds");
-          return yield* Fiber.join(eventsFiber);
-        }),
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({}).pipe(Stream.take(2), Stream.runCollect),
+        ),
       );
 
       const [first, second] = Array.from(events);
@@ -523,7 +532,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         type: "providerStatuses",
         payload: { providers },
       });
-    }).pipe(Effect.provide(Layer.mergeAll(NodeHttpServer.layerTest, TestClock.layer()))),
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect(
@@ -827,7 +836,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       const stacked = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.gitRunStackedAction]({ cwd: "/tmp/repo", action: "commit" }),
+          client[WS_METHODS.gitRunStackedAction]({
+            actionId: "action-1",
+            cwd: "/tmp/repo",
+            action: "commit",
+          }),
         ),
       );
       assert.equal(stacked.action, "commit");
@@ -946,7 +959,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             id: ProjectId.makeUnsafe("project-a"),
             title: "Project A",
             workspaceRoot: "/tmp/project-a",
-            defaultModel: "gpt-5-codex",
+            defaultModelSelection,
             scripts: [],
             createdAt: now,
             updatedAt: now,
@@ -958,13 +971,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             id: ThreadId.makeUnsafe("thread-1"),
             projectId: ProjectId.makeUnsafe("project-a"),
             title: "Thread A",
-            model: "gpt-5-codex",
+            modelSelection: defaultModelSelection,
             interactionMode: "default" as const,
             runtimeMode: "full-access" as const,
             branch: null,
             worktreePath: null,
             createdAt: now,
             updatedAt: now,
+            archivedAt: null,
             latestTurn: null,
             messages: [],
             session: null,

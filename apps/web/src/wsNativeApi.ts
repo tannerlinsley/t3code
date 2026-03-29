@@ -1,4 +1,5 @@
 import {
+  type GitActionProgressEvent,
   ORCHESTRATION_WS_METHODS,
   type ContextMenuItem,
   type NativeApi,
@@ -6,6 +7,8 @@ import {
   type ServerConfigStreamEvent,
   type ServerConfigUpdatedPayload,
   type ServerLifecycleStreamEvent,
+  type ServerProviderUpdatedPayload,
+  type ServerSettings,
   WS_METHODS,
   type WsWelcomePayload,
 } from "@t3tools/contracts";
@@ -15,6 +18,9 @@ import { WsTransport } from "./wsTransport";
 
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 const welcomeListeners = new Set<(payload: WsWelcomePayload) => void>();
+const gitActionProgressListeners = new Set<(payload: GitActionProgressEvent) => void>();
+const providersUpdatedListeners = new Set<(payload: ServerProviderUpdatedPayload) => void>();
+
 export type ServerConfigUpdateSource = ServerConfigStreamEvent["type"];
 
 interface ServerConfigUpdatedNotification {
@@ -25,11 +31,11 @@ interface ServerConfigUpdatedNotification {
 const serverConfigUpdatedListeners = new Set<
   (payload: ServerConfigUpdatedPayload, source: ServerConfigUpdateSource) => void
 >();
-const pendingServerConfigResolvers = new Set<(config: ServerConfig) => void>();
 
 let latestWelcomePayload: WsWelcomePayload | null = null;
 let latestServerConfig: ServerConfig | null = null;
 let latestServerConfigUpdated: ServerConfigUpdatedNotification | null = null;
+let latestProvidersUpdated: ServerProviderUpdatedPayload | null = null;
 
 function emitWelcome(payload: WsWelcomePayload) {
   latestWelcomePayload = payload;
@@ -42,12 +48,19 @@ function emitWelcome(payload: WsWelcomePayload) {
   }
 }
 
+function emitProvidersUpdated(payload: ServerProviderUpdatedPayload) {
+  latestProvidersUpdated = payload;
+  for (const listener of providersUpdatedListeners) {
+    try {
+      listener(payload);
+    } catch {
+      // Swallow listener errors.
+    }
+  }
+}
+
 function resolveServerConfig(config: ServerConfig) {
   latestServerConfig = config;
-  for (const resolve of pendingServerConfigResolvers) {
-    resolve(config);
-  }
-  pendingServerConfigResolvers.clear();
 }
 
 function emitServerConfigUpdated(
@@ -64,17 +77,20 @@ function emitServerConfigUpdated(
   }
 }
 
+function toServerConfigUpdatedPayload(config: ServerConfig): ServerConfigUpdatedPayload {
+  return {
+    issues: config.issues,
+    providers: config.providers,
+    settings: config.settings,
+  };
+}
+
 function applyServerConfigEvent(event: ServerConfigStreamEvent) {
   switch (event.type) {
     case "snapshot": {
       resolveServerConfig(event.config);
-      emitServerConfigUpdated(
-        {
-          issues: event.config.issues,
-          providers: event.config.providers,
-        },
-        event.type,
-      );
+      emitProvidersUpdated({ providers: event.config.providers });
+      emitServerConfigUpdated(toServerConfigUpdatedPayload(event.config), event.type);
       return;
     }
     case "keybindingsUpdated": {
@@ -86,13 +102,7 @@ function applyServerConfigEvent(event: ServerConfigStreamEvent) {
         issues: event.payload.issues,
       } satisfies ServerConfig;
       resolveServerConfig(nextConfig);
-      emitServerConfigUpdated(
-        {
-          issues: nextConfig.issues,
-          providers: nextConfig.providers,
-        },
-        event.type,
-      );
+      emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), event.type);
       return;
     }
     case "providerStatuses": {
@@ -104,25 +114,37 @@ function applyServerConfigEvent(event: ServerConfigStreamEvent) {
         providers: event.payload.providers,
       } satisfies ServerConfig;
       resolveServerConfig(nextConfig);
-      emitServerConfigUpdated(
-        {
-          issues: nextConfig.issues,
-          providers: nextConfig.providers,
-        },
-        event.type,
-      );
+      emitProvidersUpdated({ providers: nextConfig.providers });
+      emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), event.type);
+      return;
+    }
+    case "settingsUpdated": {
+      if (!latestServerConfig) {
+        return;
+      }
+      const nextConfig = {
+        ...latestServerConfig,
+        settings: event.payload.settings,
+      } satisfies ServerConfig;
+      resolveServerConfig(nextConfig);
+      emitServerConfigUpdated(toServerConfigUpdatedPayload(nextConfig), event.type);
       return;
     }
   }
 }
 
-function getServerConfigSnapshot(): Promise<ServerConfig> {
+async function getServerConfigSnapshot(transport: WsTransport): Promise<ServerConfig> {
   if (latestServerConfig) {
-    return Promise.resolve(latestServerConfig);
+    return latestServerConfig;
   }
-  return new Promise<ServerConfig>((resolve) => {
-    pendingServerConfigResolvers.add(resolve);
-  });
+
+  const config = await transport.request<ServerConfig>(WS_METHODS.serverGetConfig, {});
+  if (!latestServerConfig) {
+    resolveServerConfig(config);
+    emitProvidersUpdated({ providers: config.providers });
+    emitServerConfigUpdated(toServerConfigUpdatedPayload(config), "snapshot");
+  }
+  return latestServerConfig ?? config;
 }
 
 /**
@@ -167,6 +189,24 @@ export function onServerConfigUpdated(
   };
 }
 
+export function onServerProvidersUpdated(
+  listener: (payload: ServerProviderUpdatedPayload) => void,
+): () => void {
+  providersUpdatedListeners.add(listener);
+
+  if (latestProvidersUpdated) {
+    try {
+      listener(latestProvidersUpdated);
+    } catch {
+      // Swallow listener errors.
+    }
+  }
+
+  return () => {
+    providersUpdatedListeners.delete(listener);
+  };
+}
+
 export function createWsNativeApi(): NativeApi {
   if (instance) {
     return instance.api;
@@ -186,6 +226,19 @@ export function createWsNativeApi(): NativeApi {
   transport.subscribe(WS_METHODS.subscribeServerConfig, {}, (event: ServerConfigStreamEvent) => {
     applyServerConfigEvent(event);
   });
+  transport.subscribe(
+    WS_METHODS.subscribeGitActionProgress,
+    {},
+    (event: GitActionProgressEvent) => {
+      for (const listener of gitActionProgressListeners) {
+        try {
+          listener(event);
+        } catch {
+          // Swallow listener errors.
+        }
+      }
+    },
+  );
 
   const api: NativeApi = {
     dialogs: {
@@ -231,7 +284,8 @@ export function createWsNativeApi(): NativeApi {
     git: {
       pull: (input) => transport.request(WS_METHODS.gitPull, input),
       status: (input) => transport.request(WS_METHODS.gitStatus, input),
-      runStackedAction: (input) => transport.request(WS_METHODS.gitRunStackedAction, input),
+      runStackedAction: (input) =>
+        transport.request(WS_METHODS.gitRunStackedAction, input, { timeoutMs: null }),
       listBranches: (input) => transport.request(WS_METHODS.gitListBranches, input),
       createWorktree: (input) => transport.request(WS_METHODS.gitCreateWorktree, input),
       removeWorktree: (input) => transport.request(WS_METHODS.gitRemoveWorktree, input),
@@ -241,6 +295,12 @@ export function createWsNativeApi(): NativeApi {
       resolvePullRequest: (input) => transport.request(WS_METHODS.gitResolvePullRequest, input),
       preparePullRequestThread: (input) =>
         transport.request(WS_METHODS.gitPreparePullRequestThread, input),
+      onActionProgress: (callback) => {
+        gitActionProgressListeners.add(callback);
+        return () => {
+          gitActionProgressListeners.delete(callback);
+        };
+      },
     },
     contextMenu: {
       show: async <T extends string>(
@@ -254,8 +314,32 @@ export function createWsNativeApi(): NativeApi {
       },
     },
     server: {
-      getConfig: () => getServerConfigSnapshot(),
+      getConfig: () => getServerConfigSnapshot(transport),
+      refreshProviders: () =>
+        transport
+          .request<ServerProviderUpdatedPayload>(WS_METHODS.serverRefreshProviders, {})
+          .then((payload) => {
+            emitProvidersUpdated(payload);
+            applyServerConfigEvent({
+              version: 1,
+              type: "providerStatuses",
+              payload,
+            });
+            return payload;
+          }),
       upsertKeybinding: (input) => transport.request(WS_METHODS.serverUpsertKeybinding, input),
+      getSettings: () => transport.request<ServerSettings>(WS_METHODS.serverGetSettings, {}),
+      updateSettings: (patch) =>
+        transport
+          .request<ServerSettings>(WS_METHODS.serverUpdateSettings, { patch })
+          .then((settings) => {
+            applyServerConfigEvent({
+              version: 1,
+              type: "settingsUpdated",
+              payload: { settings },
+            });
+            return settings;
+          }),
     },
     orchestration: {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot, {}),

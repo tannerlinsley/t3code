@@ -1,8 +1,10 @@
+import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { OpenError, OpenInEditorInput } from "./editor";
 import {
+  GitActionProgressEvent,
   GitCheckoutInput,
   GitCommandError,
   GitCreateBranchInput,
@@ -61,11 +63,15 @@ import {
 } from "./terminal";
 import {
   ServerConfigStreamEvent,
+  ServerConfig,
   ServerLifecycleStreamEvent,
+  ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server";
+import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
 import {
+  SubscribeGitActionProgressInput,
   SubscribeOrchestrationDomainEventsInput,
   SubscribeServerConfigInput,
   SubscribeServerLifecycleInput,
@@ -77,6 +83,29 @@ export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybi
   payload: ServerUpsertKeybindingInput,
   success: ServerUpsertKeybindingResult,
   error: KeybindingsConfigError,
+});
+
+export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
+  payload: Schema.Struct({}),
+  success: ServerConfig,
+  error: Schema.Union([KeybindingsConfigError, ServerSettingsError]),
+});
+
+export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
+  payload: Schema.Struct({}),
+  success: ServerProviderUpdatedPayload,
+});
+
+export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
+  payload: Schema.Struct({}),
+  success: ServerSettings,
+  error: ServerSettingsError,
+});
+
+export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
+  payload: Schema.Struct({ patch: ServerSettingsPatch }),
+  success: ServerSettings,
+  error: ServerSettingsError,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -244,7 +273,7 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: SubscribeServerConfigInput,
   success: ServerConfigStreamEvent,
-  error: KeybindingsConfigError,
+  error: Schema.Union([KeybindingsConfigError, ServerSettingsError]),
   stream: true,
 });
 
@@ -254,8 +283,18 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
+export const WsSubscribeGitActionProgressRpc = Rpc.make(WS_METHODS.subscribeGitActionProgress, {
+  payload: SubscribeGitActionProgressInput,
+  success: GitActionProgressEvent,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
+  WsServerGetConfigRpc,
+  WsServerRefreshProvidersRpc,
   WsServerUpsertKeybindingRpc,
+  WsServerGetSettingsRpc,
+  WsServerUpdateSettingsRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,
@@ -280,6 +319,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
+  WsSubscribeGitActionProgressRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
