@@ -105,6 +105,7 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  createThreadJumpHintVisibilityController,
   getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
   resolveAdjacentThreadId,
@@ -116,6 +117,7 @@ import {
   shouldClearThreadSelectionOnMouseDown,
   sortProjectsForSidebar,
   sortThreadsForSidebar,
+  THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
@@ -362,6 +364,9 @@ export default function Sidebar() {
     ReadonlySet<ProjectId>
   >(() => new Set());
   const [showThreadJumpHints, setShowThreadJumpHints] = useState(false);
+  const threadJumpHintVisibilityControllerRef = useRef<ReturnType<
+    typeof createThreadJumpHintVisibilityController
+  > | null>(null);
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
@@ -1107,13 +1112,34 @@ export default function Sidebar() {
   );
 
   useEffect(() => {
+    const controller = createThreadJumpHintVisibilityController({
+      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
+      onVisibilityChange: (visible) => {
+        setShowThreadJumpHints(visible);
+      },
+      setTimeoutFn: window.setTimeout.bind(window),
+      clearTimeoutFn: window.clearTimeout.bind(window),
+    });
+    threadJumpHintVisibilityControllerRef.current = controller;
+
+    return () => {
+      controller.dispose();
+      threadJumpHintVisibilityControllerRef.current = null;
+    };
+  }, []);
+
+  const updateThreadJumpHintsVisibility = useCallback((shouldShow: boolean) => {
+    threadJumpHintVisibilityControllerRef.current?.sync(shouldShow);
+  }, []);
+
+  useEffect(() => {
     const getShortcutContext = () => ({
       terminalFocus: isTerminalFocused(),
       terminalOpen: routeTerminalOpen,
     });
 
     const onWindowKeyDown = (event: KeyboardEvent) => {
-      setShowThreadJumpHints(
+      updateThreadJumpHintsVisibility(
         shouldShowThreadJumpHints(event, keybindings, {
           platform,
           context: getShortcutContext(),
@@ -1161,7 +1187,7 @@ export default function Sidebar() {
     };
 
     const onWindowKeyUp = (event: KeyboardEvent) => {
-      setShowThreadJumpHints(
+      updateThreadJumpHintsVisibility(
         shouldShowThreadJumpHints(event, keybindings, {
           platform,
           context: getShortcutContext(),
@@ -1170,7 +1196,7 @@ export default function Sidebar() {
     };
 
     const onWindowBlur = () => {
-      setShowThreadJumpHints(false);
+      updateThreadJumpHintsVisibility(false);
     };
 
     window.addEventListener("keydown", onWindowKeyDown);
@@ -1190,6 +1216,7 @@ export default function Sidebar() {
     routeTerminalOpen,
     routeThreadId,
     threadJumpThreadIds,
+    updateThreadJumpHintsVisibility,
   ]);
 
   function renderProjectItem(
