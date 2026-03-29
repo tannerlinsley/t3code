@@ -748,56 +748,62 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       });
     });
 
+    const runKillEscalation = Effect.fn("terminal.runKillEscalation")(function* (
+      process: PtyProcess,
+      threadId: string,
+      terminalId: string,
+    ) {
+      const terminated = yield* Effect.try({
+        try: () => process.kill("SIGTERM"),
+        catch: (cause) =>
+          new TerminalProcessSignalError({
+            message: "Failed to send SIGTERM to terminal process.",
+            cause,
+            signal: "SIGTERM",
+          }),
+      }).pipe(
+        Effect.as(true),
+        Effect.catch((error) =>
+          Effect.logWarning("failed to kill terminal process", {
+            threadId,
+            terminalId,
+            signal: "SIGTERM",
+            error: error.message,
+          }).pipe(Effect.as(false)),
+        ),
+      );
+      if (!terminated) {
+        return;
+      }
+
+      yield* Effect.sleep(processKillGraceMs);
+
+      yield* Effect.try({
+        try: () => process.kill("SIGKILL"),
+        catch: (cause) =>
+          new TerminalProcessSignalError({
+            message: "Failed to send SIGKILL to terminal process.",
+            cause,
+            signal: "SIGKILL",
+          }),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to force-kill terminal process", {
+            threadId,
+            terminalId,
+            signal: "SIGKILL",
+            error: error.message,
+          }),
+        ),
+      );
+    });
+
     const startKillEscalation = Effect.fn("terminal.startKillEscalation")(function* (
       process: PtyProcess,
       threadId: string,
       terminalId: string,
     ) {
-      const fiber = yield* Effect.gen(function* () {
-        const terminated = yield* Effect.try({
-          try: () => process.kill("SIGTERM"),
-          catch: (cause) =>
-            new TerminalProcessSignalError({
-              message: "Failed to send SIGTERM to terminal process.",
-              cause,
-              signal: "SIGTERM",
-            }),
-        }).pipe(
-          Effect.as(true),
-          Effect.catch((error) =>
-            Effect.logWarning("failed to kill terminal process", {
-              threadId,
-              terminalId,
-              signal: "SIGTERM",
-              error: error.message,
-            }).pipe(Effect.as(false)),
-          ),
-        );
-        if (!terminated) {
-          return;
-        }
-
-        yield* Effect.sleep(processKillGraceMs);
-
-        yield* Effect.try({
-          try: () => process.kill("SIGKILL"),
-          catch: (cause) =>
-            new TerminalProcessSignalError({
-              message: "Failed to send SIGKILL to terminal process.",
-              cause,
-              signal: "SIGKILL",
-            }),
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("failed to force-kill terminal process", {
-              threadId,
-              terminalId,
-              signal: "SIGKILL",
-              error: error.message,
-            }),
-          ),
-        );
-      }).pipe(
+      const fiber = yield* runKillEscalation(process, threadId, terminalId).pipe(
         Effect.ensuring(
           modifyManagerState((state) => {
             if (!state.killFibers.has(process)) {
@@ -1562,17 +1568,18 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           Effect.gen(function* () {
             const terminalPid = session.pid;
             const hasRunningSubprocess = yield* subprocessChecker(terminalPid).pipe(
+              Effect.map(Option.some),
               Effect.catch((error) =>
                 Effect.logWarning("failed to check terminal subprocess activity", {
                   threadId: session.threadId,
                   terminalId: session.terminalId,
                   terminalPid,
                   error: error.message,
-                }).pipe(Effect.as(false)),
+                }).pipe(Effect.as(Option.none<boolean>())),
               ),
             );
 
-            if (!hasRunningSubprocess) {
+            if (Option.isNone(hasRunningSubprocess)) {
               return;
             }
 
@@ -1584,12 +1591,12 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                 Option.isNone(liveSession) ||
                 liveSession.value.status !== "running" ||
                 liveSession.value.pid !== terminalPid ||
-                liveSession.value.hasRunningSubprocess === hasRunningSubprocess
+                liveSession.value.hasRunningSubprocess === hasRunningSubprocess.value
               ) {
                 return [Option.none(), state] as const;
               }
 
-              liveSession.value.hasRunningSubprocess = hasRunningSubprocess;
+              liveSession.value.hasRunningSubprocess = hasRunningSubprocess.value;
               liveSession.value.updatedAt = new Date().toISOString();
 
               return [
@@ -1598,7 +1605,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
                   threadId: liveSession.value.threadId,
                   terminalId: liveSession.value.terminalId,
                   createdAt: new Date().toISOString(),
-                  hasRunningSubprocess: hasRunningSubprocess,
+                  hasRunningSubprocess: hasRunningSubprocess.value,
                 }),
                 state,
               ] as const;
@@ -1630,30 +1637,19 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             ] as const,
         );
 
-        for (const session of sessions) {
-          cleanupProcessHandles(session);
-          if (!session.process) {
-            continue;
-          }
-          yield* clearKillFiber(session.process);
-          yield* Effect.try({
-            try: () => session.process?.kill("SIGTERM"),
-            catch: (cause) =>
-              new TerminalProcessSignalError({
-                message: "Failed to send SIGTERM to terminal process during shutdown.",
-                cause,
-                signal: "SIGTERM",
-              }),
-          }).pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("failed to kill terminal process during shutdown", {
-                threadId: session.threadId,
-                terminalId: session.terminalId,
-                error: error.message,
-              }),
-            ),
-          );
-        }
+        yield* Effect.forEach(
+          sessions,
+          (session) =>
+            Effect.gen(function* () {
+              cleanupProcessHandles(session);
+              if (!session.process) {
+                return;
+              }
+              yield* clearKillFiber(session.process);
+              yield* runKillEscalation(session.process, session.threadId, session.terminalId);
+            }),
+          { concurrency: "unbounded", discard: true },
+        );
       }).pipe(Effect.ignoreCause({ log: true })),
     );
 

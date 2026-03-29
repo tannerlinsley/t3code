@@ -806,7 +806,7 @@ describe("TerminalManager", () => {
   });
 
   it("scoped runtime shutdown stops active terminals cleanly", async () => {
-    const result = await createManager();
+    const result = await createManager(5, { processKillGraceMs: 10 });
     const { manager, ptyAdapter, run, dispose } = result;
     await run(manager.open(openInput()));
     const process = ptyAdapter.processes[0];
@@ -814,7 +814,9 @@ describe("TerminalManager", () => {
     if (!process) return;
 
     await dispose();
+    await waitFor(() => process.killSignals.includes("SIGKILL"));
 
     expect(process.killSignals[0]).toBe("SIGTERM");
+    expect(process.killSignals).toContain("SIGKILL");
   });
 });
